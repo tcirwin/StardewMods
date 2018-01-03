@@ -84,24 +84,12 @@ namespace Pathoschild.Stardew.Automate.Framework
                 if (!visited.Add(tile))
                     continue;
 
-                // get machine or container on tile
-                Vector2 foundSize;
-                if (this.TryGetMachine(location, tile, reflection, out IMachine machine, out Vector2 size))
-                {
-                    group.Add(machine);
-                    foundSize = size;
-                }
-                else if (this.TryGetChest(location, tile, out Chest chest))
-                {
-                    group.Add(new ChestContainer(chest));
-                    foundSize = Vector2.One;
-                }
-                else
-                    continue;
+                // Determine what is in the tile
+                Rectangle tileArea = FloodFillTile(group, location, tile, reflection);
 
-                // handle machine tiles
-                Rectangle tileArea = new Rectangle((int)tile.X, (int)tile.Y, (int)foundSize.X, (int)foundSize.Y);
-                group.Add(tileArea);
+                if (tileArea == Rectangle.Empty)
+                    continue; // nothing in this tile; continue searching elsewhere
+
                 foreach (Vector2 cur in tileArea.GetTiles())
                     visited.Add(cur);
 
@@ -112,6 +100,59 @@ namespace Pathoschild.Stardew.Automate.Framework
                         queue.Enqueue(next);
                 }
             }
+        }
+
+        private Rectangle FloodFillTile(MachineGroupBuilder group, GameLocation location, Vector2 tile, IReflectionHelper reflection)
+        {
+            // get machine or container on tile
+            Vector2 foundSize;
+            if (this.TryGetBuilding(location, tile, reflection, out Building building, out Vector2 size))
+            {
+                IMachine machine = this.GetMachine(building);
+                if (machine != null)
+                    group.Add(machine);
+
+                if (this.TryGetIndoorChests(location, tile, out IEnumerable<Chest> chests))
+                    foreach (var chest in chests)
+                        group.Add(new ChestContainer(chest));
+
+                foundSize = size;
+            }
+            else if (this.TryGetMachine(location, tile, reflection, out IMachine machine, out Vector2 size2))
+            {
+                group.Add(machine);
+                foundSize = size2;
+            }
+            else if (this.TryGetChest(location, tile, out Chest chest) )
+            {
+                group.Add(new ChestContainer(chest));
+                foundSize = Vector2.One;
+            }
+            else
+                return Rectangle.Empty;
+
+            // handle machine tiles
+            Rectangle tileArea = new Rectangle((int)tile.X, (int)tile.Y, (int)foundSize.X, (int)foundSize.Y);
+            group.Add(tileArea);
+
+            return tileArea;
+        }
+
+        private bool TryGetBuilding(GameLocation location, Vector2 tile, IReflectionHelper reflection, out Building building, out Vector2 size)
+        {
+            // building machine
+            building = this.GetBuilding(location, tile);
+            if (building != null)
+            {
+                if (building is Coop)
+                {
+                    size = new Vector2(building.tilesWide, building.tilesHigh);
+                    return true;
+                }
+            }
+
+            size = Vector2.Zero;
+            return false;
         }
 
         /// <summary>Get a machine from the given tile, if any.</summary>
@@ -145,24 +186,6 @@ namespace Pathoschild.Stardew.Automate.Framework
                 }
             }
 
-            // building machine
-            if (location is BuildableGameLocation buildableLocation)
-            {
-                foreach (Building building in buildableLocation.buildings)
-                {
-                    Rectangle tileArea = new Rectangle(building.tileX, building.tileY, building.tilesWide, building.tilesHigh);
-                    if (tileArea.Contains((int)tile.X, (int)tile.Y))
-                    {
-                        machine = this.GetMachine(building);
-                        if (machine != null)
-                        {
-                            size = new Vector2(building.tilesWide, building.tilesHigh);
-                            return true;
-                        }
-                    }
-                }
-            }
-
             // map machines
             if (this.TryGetTileMachine(location, tile, reflection, out machine, out size))
                 return true;
@@ -170,6 +193,23 @@ namespace Pathoschild.Stardew.Automate.Framework
             // none
             machine = null;
             return false;
+        }
+
+        private Building GetBuilding(GameLocation location, Vector2 tile)
+        {
+            if (location is BuildableGameLocation buildableLocation)
+            {
+                foreach (Building building in buildableLocation.buildings)
+                {
+                    Rectangle tileArea = new Rectangle(building.tileX, building.tileY, building.tilesWide, building.tilesHigh);
+                    if (tileArea.Contains((int)tile.X, (int)tile.Y))
+                    {
+                        return building;
+                    }
+                }
+            }
+
+            return null;
         }
 
         /// <param name="obj">The object for which to get a machine.</param>
@@ -246,6 +286,8 @@ namespace Pathoschild.Stardew.Automate.Framework
         {
             if (building is JunimoHut hut)
                 return new JunimoHutMachine(hut);
+            if (building is Coop coop)
+                return new CoopMachine(coop);
             if (building is Mill mill)
                 return new MillMachine(mill);
             if (building.buildingType == "Silo")
@@ -301,6 +343,24 @@ namespace Pathoschild.Stardew.Automate.Framework
             }
 
             chest = null;
+            return false;
+        }
+
+        private bool TryGetIndoorChests(GameLocation location, Vector2 tile, out IEnumerable<Chest> chests)
+        {
+            Building building = this.GetBuilding(location, tile);
+            // building chests
+            if (building != null)
+            {
+                var indoors = building.indoors;
+                if (indoors != null && indoors.Objects != null)
+                {
+                    chests = indoors.Objects.Values.Where(item => item is Chest).Select(item => (Chest)item);
+                    return true;
+                }
+            }
+
+            chests = Enumerable.Empty<Chest>();
             return false;
         }
     }
