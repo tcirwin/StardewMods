@@ -144,7 +144,7 @@ namespace Pathoschild.Stardew.Automate.Framework
             building = this.GetBuilding(location, tile);
             if (building != null)
             {
-                if (building is Coop)
+                if (building is Coop || building is Barn)
                 {
                     size = new Vector2(building.tilesWide, building.tilesHigh);
                     return true;
@@ -288,6 +288,8 @@ namespace Pathoschild.Stardew.Automate.Framework
                 return new JunimoHutMachine(hut);
             if (building is Coop coop)
                 return new CoopMachine(coop);
+            if (building is Barn barn)
+                return new BarnMachine(barn);
             if (building is Mill mill)
                 return new MillMachine(mill);
             if (building.buildingType == "Silo")
