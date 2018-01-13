@@ -282,18 +282,22 @@ namespace Pathoschild.Stardew.Automate.Framework
 
         /// <summary>Get a machine for the given building, if applicable.</summary>
         /// <param name="building">The building for which to get a machine.</param>
-        private IMachine GetMachine(Building building)
+        private IMachine GetMachine(Building building, GameLocation location)
         {
-            if (building is JunimoHut hut)
-                return new JunimoHutMachine(hut);
-            if (building is Coop coop)
-                return new CoopMachine(coop);
-            if (building is Barn barn)
-                return new BarnMachine(barn);
-            if (building is Mill mill)
-                return new MillMachine(mill);
-            if (building.buildingType == "Silo")
-                return new FeedHopperMachine();
+            Farm farm;
+            if ((farm = location as Farm) != null)
+            {
+                if (building is JunimoHut hut)
+                    return new JunimoHutMachine(hut);
+                if (building is Coop coop)
+                    return new CoopMachine(coop);
+                if (building is Barn barn)
+                    return new FarmAnimalMachine(farm, barn);
+                if (building is Mill mill)
+                    return new MillMachine(mill);
+                if (building.buildingType == "Silo")
+                    return new FeedHopperMachine();
+            }
             return null;
         }
 

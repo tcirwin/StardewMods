@@ -13,7 +13,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
     internal class BarnMachine: IMachine
     {
         private readonly AnimalHouse AnimalHouse = null;
-        private List<FarmAnimal> UnprocessedAnimals;
+        protected List<FarmAnimal> UnprocessedAnimals;
 
         private static readonly Dictionary<string, string> HarvestTextures = new Dictionary<string, string>
         {

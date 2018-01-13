@@ -21,7 +21,7 @@ namespace Pathoschild.Stardew.Automate
         private ModConfig Config;
 
         /// <summary>Constructs machine instances.</summary>
-        private readonly MachineFactory Factory = new MachineFactory();
+        private MachineFactory Factory;
 
         /// <summary>The machines to process.</summary>
         private readonly IDictionary<GameLocation, MachineGroup[]> MachineGroups = new Dictionary<GameLocation, MachineGroup[]>();
@@ -35,7 +35,6 @@ namespace Pathoschild.Stardew.Automate
         /// <summary>The current overlay being displayed, if any.</summary>
         private OverlayMenu CurrentOverlay;
 
-
         /*********
         ** Public methods
         *********/
@@ -45,6 +44,7 @@ namespace Pathoschild.Stardew.Automate
         {
             // read config
             this.Config = helper.ReadConfig<ModConfig>();
+            this.Factory = new MachineFactory(this.Monitor);
 
             // hook events
             SaveEvents.AfterLoad += this.SaveEvents_AfterLoad;
