@@ -1,24 +1,30 @@
-using Microsoft.Xna.Framework;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Pathoschild.Stardew.TractorMod.Framework
 {
-    /// <summary>The configuration file for the legacy save format.</summary>
+    /// <summary>Contains legacy data that's stored in the save file.</summary>
     internal class LegacySaveData
     {
-        /// <summary>The data for each save.</summary>
-        public LegacySaveEntry[] Saves { get; set; }
+        /*********
+        ** Accessors
+        *********/
+        /// <summary>The custom buildings for this save.</summary>
+        public LegacySaveDataBuilding[] Buildings { get; set; }
 
-        /// <summary>The model for one save's data.</summary>
-        internal class LegacySaveEntry
+
+        /*********
+        ** Public methods
+        *********/
+        /// <summary>Construct an instance.</summary>
+        /// <remarks>This constructor is needed to deserialise from JSON.</remarks>
+        public LegacySaveData() { }
+
+        /// <summary>Construct an instance.</summary>
+        /// <param name="buildings">The custom buildings to save.</param>
+        public LegacySaveData(IEnumerable<LegacySaveDataBuilding> buildings)
         {
-            /// <summary>The player name.</summary>
-            public string FarmerName { get; set; }
-
-            /// <summary>The player's save seed.</summary>
-            public long SaveSeed { get; set; }
-
-            /// <summary>The positions of the player houses.</summary>
-            public Vector2[] TractorHouse { get; set; }
+            this.Buildings = buildings.ToArray();
         }
     }
 }

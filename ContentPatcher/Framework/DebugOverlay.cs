@@ -43,7 +43,7 @@ namespace ContentPatcher.Framework
         public DebugOverlay(IContentHelper contentHelper)
         {
             this.Content = contentHelper;
-            this.TextureNames = this.GetTextureNames(contentHelper).OrderBy(p => p).ToArray();
+            this.TextureNames = this.GetTextureNames(contentHelper).OrderByIgnoreCase(p => p).ToArray();
             this.NextTexture();
         }
 
@@ -95,7 +95,7 @@ namespace ContentPatcher.Framework
             IList<string> textureKeys = new List<string>();
             contentHelper.InvalidateCache(asset =>
             {
-                if (asset.DataType == typeof(Texture2D) && !asset.AssetName.Contains("..") && !asset.AssetName.StartsWith(Constants.ExecutionPath))
+                if (asset.DataType == typeof(Texture2D) && !asset.AssetName.Contains("..") && !asset.AssetName.StartsWith(StardewModdingAPI.Constants.ExecutionPath))
                     textureKeys.Add(asset.AssetName);
                 return false;
             });

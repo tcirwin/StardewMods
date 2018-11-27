@@ -5,6 +5,7 @@ using System.Linq;
 using Pathoschild.Stardew.Automate.Framework;
 using Pathoschild.Stardew.Automate.Framework.Models;
 using Pathoschild.Stardew.Common;
+using Pathoschild.Stardew.Common.Utilities;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
@@ -27,10 +28,10 @@ namespace Pathoschild.Stardew.Automate
         private bool EnableAutomation => Context.IsMainPlayer;
 
         /// <summary>The machines to process.</summary>
-        private readonly IDictionary<GameLocation, MachineGroup[]> MachineGroups = new Dictionary<GameLocation, MachineGroup[]>();
+        private readonly IDictionary<GameLocation, MachineGroup[]> MachineGroups = new Dictionary<GameLocation, MachineGroup[]>(new ObjectReferenceComparer<GameLocation>());
 
         /// <summary>The locations that should be reloaded on the next update tick.</summary>
-        private readonly HashSet<GameLocation> ReloadQueue = new HashSet<GameLocation>();
+        private readonly HashSet<GameLocation> ReloadQueue = new HashSet<GameLocation>(new ObjectReferenceComparer<GameLocation>());
 
         /// <summary>The number of ticks until the next automation cycle.</summary>
         private int AutomateCountdown;
@@ -47,11 +48,10 @@ namespace Pathoschild.Stardew.Automate
         {
             // init
             this.Config = helper.ReadConfig<ModConfig>();
-            this.Factory = new MachineFactory(this.Config.Connectors);
+            this.Factory = new MachineFactory(this.Config.Connectors, this.Config.AutomateShippingBin);
 
             // hook events
             IModEvents events = this.Helper.Events;
-
             SaveEvents.AfterLoad += this.SaveEvents_AfterLoad;
             PlayerEvents.Warped += this.PlayerEvents_Warped;
             events.World.LocationListChanged += this.World_LocationListChanged;
@@ -63,9 +63,7 @@ namespace Pathoschild.Stardew.Automate
                 events.World.TerrainFeatureListChanged += this.World_TerrainFeatureListChanged;
 
             // log info
-            if (this.Config.VerboseLogging)
-                this.Monitor.Log($"Verbose logging is enabled. This is useful when troubleshooting but can impact performance. It should be disabled if you don't explicitly need it. You can delete {Path.Combine(this.Helper.DirectoryPath, "config.json")} and restart the game to disable it.", LogLevel.Warn);
-            this.VerboseLog($"Initialised with automation every {this.Config.AutomationInterval} ticks.");
+            this.Monitor.VerboseLog($"Initialised with automation every {this.Config.AutomationInterval} ticks.");
         }
 
 
@@ -103,12 +101,12 @@ namespace Pathoschild.Stardew.Automate
         /// <summary>The method invoked when a location is added or removed.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void World_LocationListChanged(object sender, WorldLocationListChangedEventArgs e)
+        private void World_LocationListChanged(object sender, LocationListChangedEventArgs e)
         {
             if (!this.EnableAutomation)
                 return;
 
-            this.VerboseLog("Location list changed, reloading all machines.");
+            this.Monitor.VerboseLog("Location list changed, reloading all machines.");
 
             try
             {
@@ -125,24 +123,24 @@ namespace Pathoschild.Stardew.Automate
         /// <summary>The method invoked when an object is added or removed to a location.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void World_ObjectListChanged(object sender, WorldObjectListChangedEventArgs e)
+        private void World_ObjectListChanged(object sender, ObjectListChangedEventArgs e)
         {
             if (!this.EnableAutomation)
                 return;
 
-            this.VerboseLog($"Object list changed in {e.Location.Name}, reloading machines in current location.");
+            this.Monitor.VerboseLog($"Object list changed in {e.Location.Name}, reloading machines in current location.");
             this.ReloadQueue.Add(e.Location);
         }
 
         /// <summary>The method invoked when a terrain feature is added or removed to a location.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void World_TerrainFeatureListChanged(object sender, WorldTerrainFeatureListChangedEventArgs e)
+        private void World_TerrainFeatureListChanged(object sender, TerrainFeatureListChangedEventArgs e)
         {
             if (!this.EnableAutomation)
                 return;
 
-            this.VerboseLog($"Terrain feature list changed in {e.Location.Name}, reloading machines in current location.");
+            this.Monitor.VerboseLog($"Terrain feature list changed in {e.Location.Name}, reloading machines in current location.");
             this.ReloadQueue.Add(e.Location);
         }
 
@@ -185,7 +183,7 @@ namespace Pathoschild.Stardew.Automate
         /// <summary>The method invoked when the player presses a button.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void Input_ButtonPressed(object sender, InputButtonPressedEventArgs e)
+        private void Input_ButtonPressed(object sender, ButtonPressedEventArgs e)
         {
             try
             {
@@ -221,7 +219,7 @@ namespace Pathoschild.Stardew.Automate
         /// <param name="location">The location whose machines to reload.</param>
         private void ReloadMachinesIn(GameLocation location)
         {
-            this.VerboseLog($"Reloading machines in {location.Name}...");
+            this.Monitor.VerboseLog($"Reloading machines in {location.Name}...");
 
             this.MachineGroups[location] = this.Factory.GetActiveMachinesGroups(location, this.Helper.Reflection).ToArray();
             if (!this.MachineGroups[location].Any())
@@ -235,14 +233,6 @@ namespace Pathoschild.Stardew.Automate
         {
             this.Monitor.Log($"Something went wrong {verb}:\n{ex}", LogLevel.Error);
             CommonHelper.ShowErrorMessage($"Huh. Something went wrong {verb}. The error log has the technical details.");
-        }
-
-        /// <summary>Log a trace message if verbose logging is enabled.</summary>
-        /// <param name="message">The message to log.</param>
-        private void VerboseLog(string message)
-        {
-            if (this.Config.VerboseLogging)
-                this.Monitor.Log(message, LogLevel.Trace);
         }
 
         /// <summary>Disable the overlay, if shown.</summary>

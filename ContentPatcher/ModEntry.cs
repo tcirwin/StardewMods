@@ -7,7 +7,9 @@ using ContentPatcher.Framework;
 using ContentPatcher.Framework.Commands;
 using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.ConfigModels;
+using ContentPatcher.Framework.Migrations;
 using ContentPatcher.Framework.Patches;
+using ContentPatcher.Framework.Tokens;
 using Pathoschild.Stardew.Common.Utilities;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
@@ -27,16 +29,25 @@ namespace ContentPatcher
         private readonly string ConfigFileName = "config.json";
 
         /// <summary>The supported format versions.</summary>
-        private readonly string[] SupportedFormatVersions = { "1.0", "1.3", "1.4" };
+        private readonly string[] SupportedFormatVersions = { "1.0", "1.3", "1.4", "1.5", "1.6" };
 
-        /// <summary>Handles constructing, permuting, and updating conditions.</summary>
-        private readonly ConditionFactory ConditionFactory = new ConditionFactory();
+        /// <summary>The format version migrations to apply.</summary>
+        private readonly Func<IMigration[]> Migrations = () => new IMigration[]
+        {
+            new Migration_1_3(),
+            new Migration_1_4(),
+            new Migration_1_5(),
+            new Migration_1_6()
+        };
 
-        /// <summary>Handles the 'patch' console command.</summary>
-        private CommandHandler CommandHandler;
+        /// <summary>Manages the available contextual tokens.</summary>
+        private TokenManager TokenManager;
 
         /// <summary>Manages loaded patches.</summary>
         private PatchManager PatchManager;
+
+        /// <summary>Handles the 'patch' console command.</summary>
+        private CommandHandler CommandHandler;
 
         /// <summary>The mod configuration.</summary>
         private ModConfig Config;
@@ -52,21 +63,28 @@ namespace ContentPatcher
         /// <param name="helper">Provides simplified APIs for writing mods.</param>
         public override void Entry(IModHelper helper)
         {
-            // init
             this.Config = helper.ReadConfig<ModConfig>();
-            this.PatchManager = new PatchManager(this.Monitor, this.ConditionFactory, this.Config.VerboseLog, helper.Content.NormaliseAssetName, helper.Content.CurrentLocaleConstant);
-            string[] contentPackIDs = this.LoadContentPacks().ToArray();
+
+            // init migrations
+            IMigration[] migrations = this.Migrations();
+
+            // fetch content packs
+            RawContentPack[] contentPacks = this.GetContentPacks(migrations).ToArray();
+            string[] installedMods =
+                (contentPacks.Select(p => p.Manifest.UniqueID))
+                .Concat(helper.ModRegistry.GetAll().Select(p => p.Manifest.UniqueID))
+                .OrderByIgnoreCase(p => p)
+                .ToArray();
+
+            // load content packs and context
+            this.TokenManager = new TokenManager(helper.Content, installedMods);
+            this.PatchManager = new PatchManager(this.Monitor, this.TokenManager);
+            this.LoadContentPacks(contentPacks);
+            this.TokenManager.UpdateContext();
 
             // register patcher
             helper.Content.AssetLoaders.Add(this.PatchManager);
             helper.Content.AssetEditors.Add(this.PatchManager);
-            this.PatchManager.SetInitialContext(
-                installedMods: contentPackIDs
-                    .Concat(helper.ModRegistry.GetAll().Select(p => p.UniqueID))
-                    .OrderBy(p => p, StringComparer.InvariantCultureIgnoreCase)
-                    .ToArray()
-            );
-            this.PatchManager.UpdateContext(this.Helper.Content, this.Helper.Content.CurrentLocaleConstant, null, null, null, null, null, null, null);
 
             // set up events
             if (this.Config.EnableDebugFeatures)
@@ -75,7 +93,7 @@ namespace ContentPatcher
             TimeEvents.AfterDayStarted += this.TimeEvents_AfterDayStarted;
 
             // set up commands
-            this.CommandHandler = new CommandHandler(this.PatchManager, this.Monitor, this.UpdateContext);
+            this.CommandHandler = new CommandHandler(this.TokenManager, this.PatchManager, this.Monitor, this.UpdateContext);
             helper.ConsoleCommands.Add(this.CommandHandler.CommandName, $"Starts a Content Patcher command. Type '{this.CommandHandler.CommandName} help' for details.", (name, args) => this.CommandHandler.Handle(args));
         }
 
@@ -139,83 +157,173 @@ namespace ContentPatcher
         /// <summary>Update the current context.</summary>
         private void UpdateContext()
         {
+            this.TokenManager.UpdateContext();
             this.PatchManager.UpdateContext(this.Helper.Content);
         }
 
-        /// <summary>Load the patches from all registered content packs.</summary>
+        /// <summary>Load the registered content packs.</summary>
+        /// <param name="migrations">The format version migrations to apply.</param>
         /// <returns>Returns the loaded content pack IDs.</returns>
         [SuppressMessage("ReSharper", "AccessToModifiedClosure", Justification = "The value is used immediately, so this isn't an issue.")]
-        private IEnumerable<string> LoadContentPacks()
+        private IEnumerable<RawContentPack> GetContentPacks(IMigration[] migrations)
         {
-            ISemanticVersion latestFormatVersion = new SemanticVersion(this.SupportedFormatVersions.Last());
-            ConfigFileHandler configFileHandler = new ConfigFileHandler(this.ConfigFileName, this.PatchManager.ParseCommaDelimitedField, (pack, label, reason) => this.Monitor.Log($"Ignored {pack.Manifest.Name} > {label}: {reason}"));
-            foreach (ManagedContentPack pack in this.Helper.GetContentPacks().Select(p => new ManagedContentPack(p)))
-            {
-                this.VerboseLog($"Loading content pack '{pack.Manifest.Name}'...");
+            this.Monitor.VerboseLog("Preloading content packs...");
 
+            foreach (IContentPack contentPack in this.Helper.GetContentPacks())
+            {
+                RawContentPack rawContentPack;
                 try
                 {
-                    // read changes file
-                    ContentConfig content = pack.ReadJsonFile<ContentConfig>(this.PatchFileName);
+                    // validate content.json has required fields
+                    ContentConfig content = contentPack.ReadJsonFile<ContentConfig>(this.PatchFileName);
                     if (content == null)
                     {
-                        this.Monitor.Log($"Ignored content pack '{pack.Manifest.Name}' because it has no {this.PatchFileName} file.", LogLevel.Error);
+                        this.Monitor.Log($"Ignored content pack '{contentPack.Manifest.Name}' because it has no {this.PatchFileName} file.", LogLevel.Error);
                         continue;
                     }
                     if (content.Format == null || content.Changes == null)
                     {
-                        this.Monitor.Log($"Ignored content pack '{pack.Manifest.Name}' because it doesn't specify the required {nameof(ContentConfig.Format)} or {nameof(ContentConfig.Changes)} fields.", LogLevel.Error);
+                        this.Monitor.Log($"Ignored content pack '{contentPack.Manifest.Name}' because it doesn't specify the required {nameof(ContentConfig.Format)} or {nameof(ContentConfig.Changes)} fields.", LogLevel.Error);
                         continue;
                     }
 
-                    // validate version
-                    if (!this.SupportedFormatVersions.Contains(content.Format.ToString()))
+                    // apply migrations
+                    IMigration migrator = new AggregateMigration(content.Format, this.SupportedFormatVersions, migrations);
+                    if (!migrator.TryMigrate(content, out string error))
                     {
-                        this.Monitor.Log($"Ignored content pack '{pack.Manifest.Name}' because it uses unsupported format {content.Format} (supported version: {string.Join(", ", this.SupportedFormatVersions)}).", LogLevel.Error);
+                        this.Monitor.Log($"Loading content pack '{contentPack.Manifest.Name}' failed: {error}.", LogLevel.Error);
                         continue;
                     }
 
-                    // load config.json
-                    InvariantDictionary<ConfigField> config = configFileHandler.Read(pack, content.ConfigSchema);
-                    configFileHandler.Save(pack, config, this.Helper);
-                    if (config.Any())
-                        this.VerboseLog($"   found config.json with {config.Count} fields...");
+                    // init
+                    rawContentPack = new RawContentPack(new ManagedContentPack(contentPack), content, migrator);
+                }
+                catch (Exception ex)
+                {
+                    this.Monitor.Log($"Error preloading content pack '{contentPack.Manifest.Name}'. Technical details:\n{ex}", LogLevel.Error);
+                    continue;
+                }
 
-                    // validate features
-                    if (content.Format.IsOlderThan("1.3"))
+                yield return rawContentPack;
+            }
+        }
+
+        /// <summary>Load the patches from all registered content packs.</summary>
+        /// <param name="contentPacks">The content packs to load.</param>
+        /// <returns>Returns the loaded content pack IDs.</returns>
+        [SuppressMessage("ReSharper", "AccessToModifiedClosure", Justification = "The value is used immediately, so this isn't an issue.")]
+        private void LoadContentPacks(IEnumerable<RawContentPack> contentPacks)
+        {
+            // load content packs
+            ConfigFileHandler configFileHandler = new ConfigFileHandler(this.ConfigFileName, this.ParseCommaDelimitedField, (pack, label, reason) => this.Monitor.Log($"Ignored {pack.Manifest.Name} > {label}: {reason}"));
+            foreach (RawContentPack current in contentPacks)
+            {
+                this.Monitor.VerboseLog($"Loading content pack '{current.Manifest.Name}'...");
+
+                try
+                {
+                    ContentConfig content = current.Content;
+
+                    // load tokens
+                    ModTokenContext tokenContext = this.TokenManager.TrackLocalTokens(current.ManagedPack.Pack);
                     {
+                        // load config.json
+                        InvariantDictionary<ConfigField> config = configFileHandler.Read(current.ManagedPack, content.ConfigSchema);
+                        configFileHandler.Save(current.ManagedPack, config, this.Helper);
                         if (config.Any())
+                            this.Monitor.VerboseLog($"   found config.json with {config.Count} fields...");
+
+                        // load config tokens
+                        foreach (KeyValuePair<string, ConfigField> pair in config)
                         {
-                            this.Monitor.Log($"Loading content pack '{pack.Manifest.Name}' failed. It specifies format version {content.Format}, but uses the {nameof(ContentConfig.ConfigSchema)} field added in 1.3.", LogLevel.Error);
-                            continue;
+                            ConfigField field = pair.Value;
+                            tokenContext.Add(new ImmutableToken(pair.Key, field.Value, allowedValues: field.AllowValues, canHaveMultipleValues: field.AllowMultiple));
                         }
-                        if (content.Changes.Any(p => p.FromFile != null && p.FromFile.Contains("{{")))
+
+                        // load dynamic tokens
+                        foreach (DynamicTokenConfig entry in content.DynamicTokens ?? new DynamicTokenConfig[0])
                         {
-                            this.Monitor.Log($"Loading content pack '{pack.Manifest.Name}' failed. It specifies format version {content.Format}, but uses the {{{{token}}}} feature added in 1.3.", LogLevel.Error);
-                            continue;
-                        }
-                        if (content.Changes.Any(p => p.When != null && p.When.Any()))
-                        {
-                            this.Monitor.Log($"Loading content pack '{pack.Manifest.Name}' failed. It specifies format version {content.Format}, but uses the condition feature ({nameof(ContentConfig.Changes)}.{nameof(PatchConfig.When)} field) added in 1.3.", LogLevel.Error);
-                            continue;
+                            void LogSkip(string reason) => this.Monitor.Log($"Ignored {current.Manifest.Name} > dynamic token '{entry.Name}': {reason}", LogLevel.Warn);
+
+                            // validate token key
+                            if (!TokenName.TryParse(entry.Name, out TokenName name))
+                            {
+                                LogSkip("the name could not be parsed as a token key.");
+                                continue;
+                            }
+                            if (name.HasSubkey())
+                            {
+                                LogSkip("the token name cannot contain a subkey (:).");
+                                continue;
+                            }
+                            if (name.TryGetConditionType(out ConditionType conflictingType))
+                            {
+                                LogSkip($"conflicts with global token '{conflictingType}'.");
+                                continue;
+                            }
+                            if (config.ContainsKey(name.Key))
+                            {
+                                LogSkip($"conflicts with player config token '{conflictingType}'.");
+                                continue;
+                            }
+
+                            // parse values
+                            InvariantHashSet values = entry.Value != null ? this.ParseCommaDelimitedField(entry.Value) : new InvariantHashSet();
+
+                            // parse conditions
+                            ConditionDictionary conditions;
+                            {
+                                if (!this.TryParseConditions(entry.When, tokenContext, current.Migrator, out conditions, out string error))
+                                {
+                                    this.Monitor.Log($"Ignored {current.Manifest.Name} > '{entry.Name}' token: its {nameof(DynamicTokenConfig.When)} field is invalid: {error}.", LogLevel.Warn);
+                                    continue;
+                                }
+                            }
+
+                            // add token
+                            tokenContext.Add(new DynamicTokenValue(name, values, conditions));
                         }
                     }
 
                     // load patches
-                    this.NamePatches(pack, content.Changes);
+                    content.Changes = this.SplitPatches(content.Changes).ToArray();
+                    this.NamePatches(current.ManagedPack, content.Changes);
                     foreach (PatchConfig patch in content.Changes)
                     {
-                        this.VerboseLog($"   loading {patch.LogName}...");
-                        this.LoadPatch(pack, content, patch, config, latestFormatVersion, logSkip: reasonPhrase => this.Monitor.Log($"Ignored {patch.LogName}: {reasonPhrase}", LogLevel.Warn));
+                        this.Monitor.VerboseLog($"   loading {patch.LogName}...");
+                        this.LoadPatch(current.ManagedPack, patch, tokenContext, current.Migrator, logSkip: reasonPhrase => this.Monitor.Log($"Ignored {patch.LogName}: {reasonPhrase}", LogLevel.Warn));
                     }
                 }
                 catch (Exception ex)
                 {
-                    this.Monitor.Log($"Error loading content pack '{pack.Manifest.Name}'. Technical details:\n{ex}", LogLevel.Error);
+                    this.Monitor.Log($"Error loading content pack '{current.Manifest.Name}'. Technical details:\n{ex}", LogLevel.Error);
+                    continue;
+                }
+            }
+        }
+
+        /// <summary>Split patches with multiple target values.</summary>
+        /// <param name="patches">The patches to split.</param>
+        private IEnumerable<PatchConfig> SplitPatches(IEnumerable<PatchConfig> patches)
+        {
+            foreach (PatchConfig patch in patches)
+            {
+                if (string.IsNullOrWhiteSpace(patch.Target) || !patch.Target.Contains(","))
+                {
+                    yield return patch;
                     continue;
                 }
 
-                yield return pack.Manifest.UniqueID;
+                int i = 0;
+                foreach (string target in patch.Target.Split(','))
+                {
+                    i++;
+                    yield return new PatchConfig(patch)
+                    {
+                        LogName = !string.IsNullOrWhiteSpace(patch.LogName) ? $"{patch.LogName} {"".PadRight(i, 'I')}" : "",
+                        Target = target.Trim()
+                    };
+                }
             }
         }
 
@@ -254,12 +362,11 @@ namespace ContentPatcher
 
         /// <summary>Load one patch from a content pack's <c>content.json</c> file.</summary>
         /// <param name="pack">The content pack being loaded.</param>
-        /// <param name="contentConfig">The content pack's config.</param>
         /// <param name="entry">The change to load.</param>
-        /// <param name="config">The content pack's config values.</param>
-        /// <param name="latestFormatVersion">The latest format version.</param>
+        /// <param name="tokenContext">The tokens available for this content pack.</param>
+        /// <param name="migrator">The migrator which validates and migrates content pack data.</param>
         /// <param name="logSkip">The callback to invoke with the error reason if loading it fails.</param>
-        private bool LoadPatch(ManagedContentPack pack, ContentConfig contentConfig, PatchConfig entry, InvariantDictionary<ConfigField> config, ISemanticVersion latestFormatVersion, Action<string> logSkip)
+        private bool LoadPatch(ManagedContentPack pack, PatchConfig entry, IContext tokenContext, IMigration migrator, Action<string> logSkip)
         {
             bool TrackSkip(string reason, bool warn = true)
             {
@@ -289,45 +396,22 @@ namespace ContentPatcher
                 {
                     if (string.IsNullOrWhiteSpace(entry.Target))
                         return TrackSkip($"must set the {nameof(PatchConfig.Target)} field.");
-                    if (!this.TryParseTokenString(entry.Target, config, out string error, out TokenStringBuilder builder))
+                    if (!this.TryParseTokenString(entry.Target, tokenContext, migrator, out string error, out assetName))
                         return TrackSkip($"the {nameof(PatchConfig.Target)} is invalid: {error}");
-                    assetName = builder.Build();
                 }
 
                 // parse 'enabled'
                 bool enabled = true;
                 {
-                    if (entry.Enabled != null && !this.TryParseBoolean(entry.Enabled, config, out string error, out enabled))
+                    if (entry.Enabled != null && !this.TryParseEnabled(entry.Enabled, tokenContext, migrator, out string error, out enabled))
                         return TrackSkip($"invalid {nameof(PatchConfig.Enabled)} value '{entry.Enabled}': {error}");
-                }
-
-                // apply config
-                foreach (string key in config.Keys)
-                {
-                    if (entry.When.TryGetValue(key, out string values))
-                    {
-                        InvariantHashSet expected = this.PatchManager.ParseCommaDelimitedField(values);
-                        if (!expected.Intersect(config[key].Value, StringComparer.InvariantCultureIgnoreCase).Any())
-                            return TrackSkip($"disabled by config {key} (needs '{string.Join(", ", expected)}', found '{string.Join(", ", config[key].Value)}').", warn: false);
-
-                        entry.When.Remove(key);
-                    }
                 }
 
                 // parse conditions
                 ConditionDictionary conditions;
                 {
-                    if (!this.PatchManager.TryParseConditions(entry.When, contentConfig.Format, latestFormatVersion, out conditions, out string error))
+                    if (!this.TryParseConditions(entry.When, tokenContext, migrator, out conditions, out string error))
                         return TrackSkip($"the {nameof(PatchConfig.When)} field is invalid: {error}.");
-                }
-
-                // validate conditions
-                if (action == PatchType.Load)
-                {
-                    ConditionKey[] tokenisable = this.ConditionFactory.GetTokenisableConditions().ToArray();
-                    ConditionKey[] invalid = conditions.Keys.Except(tokenisable).ToArray();
-                    if (invalid.Any())
-                        return TrackSkip($"can't use these conditions with {nameof(PatchConfig.Action)} {PatchType.Load} ({string.Join(", ", invalid)})");
                 }
 
                 // get patch instance
@@ -338,25 +422,9 @@ namespace ContentPatcher
                     case PatchType.Load:
                         {
                             // init patch
-                            if (!this.TryPrepareLocalAsset(pack, entry.FromFile, config, conditions, out string error, out TokenString fromAsset, shouldPreload: true))
+                            if (!this.TryPrepareLocalAsset(pack, entry.FromFile, tokenContext, migrator, out string error, out TokenString fromAsset))
                                 return TrackSkip(error);
                             patch = new LoadPatch(entry.LogName, pack, assetName, conditions, fromAsset, this.Helper.Content.NormaliseAssetName);
-
-                            // detect conflicting loaders
-                            if (enabled)
-                            {
-                                InvariantDictionary<IPatch> conflicts = this.PatchManager.GetConflictingLoaders(patch);
-                                if (conflicts.Any())
-                                {
-                                    IEnumerable<string> conflictNames = (
-                                        from conflict in conflicts
-                                        orderby conflict.Key
-                                        select $"'{conflict.Value.LogName}' already loads {conflict.Key}"
-                                    );
-                                    return TrackSkip(
-                                        $"{nameof(entry.Target)} '{patch.TokenableAssetName.Raw}' conflicts with other load patches ({string.Join(", ", conflictNames)}). Each file can only be loaded by one patch, unless their conditions can never overlap.");
-                                }
-                            }
                         }
                         break;
 
@@ -371,8 +439,41 @@ namespace ContentPatcher
                             if (entry.Fields != null && entry.Fields.Any(p => p.Value == null || p.Value.Any(n => n.Value == null)))
                                 return TrackSkip($"the {nameof(PatchConfig.Fields)} can't contain empty values.");
 
+                            // parse entries
+                            List<EditDataPatchRecord> entries = new List<EditDataPatchRecord>();
+                            if (entry.Entries != null)
+                            {
+                                foreach (KeyValuePair<string, string> pair in entry.Entries)
+                                {
+                                    if (!this.TryParseTokenString(pair.Key, tokenContext, migrator, out string keyError, out TokenString key))
+                                        return TrackSkip($"the {nameof(PatchConfig.Entries)} > '{key}' entry key is invalid: {keyError}.");
+                                    if (!this.TryParseTokenString(pair.Value, tokenContext, migrator, out string error, out TokenString value))
+                                        return TrackSkip($"the {nameof(PatchConfig.Entries)} > '{key}' entry value is invalid: {error}.");
+                                    entries.Add(new EditDataPatchRecord(key, value));
+                                }
+                            }
+
+                            // parse fields
+                            List<EditDataPatchField> fields = new List<EditDataPatchField>();
+                            if (entry.Fields != null)
+                            {
+                                foreach (KeyValuePair<string, IDictionary<int, string>> recordPair in entry.Fields)
+                                {
+                                    if (!this.TryParseTokenString(recordPair.Key, tokenContext, migrator, out string keyError, out TokenString key))
+                                        return TrackSkip($"the {nameof(PatchConfig.Fields)} > '{keyError}' field key is invalid: {keyError}.");
+                                    foreach (var fieldPair in recordPair.Value)
+                                    {
+                                        int field = fieldPair.Key;
+                                        if (!this.TryParseTokenString(fieldPair.Value, tokenContext, migrator, out string valueError, out TokenString value))
+                                            return TrackSkip($"the {nameof(PatchConfig.Fields)} > '{key}' > {field} field is invalid: {valueError}.");
+
+                                        fields.Add(new EditDataPatchField(key, field, value));
+                                    }
+                                }
+                            }
+
                             // save
-                            patch = new EditDataPatch(entry.LogName, pack, assetName, conditions, entry.Entries, entry.Fields, this.Monitor, this.Helper.Content.NormaliseAssetName);
+                            patch = new EditDataPatch(entry.LogName, pack, assetName, conditions, entries, fields, this.Monitor, this.Helper.Content.NormaliseAssetName);
                         }
                         break;
 
@@ -385,7 +486,7 @@ namespace ContentPatcher
                                 return TrackSkip($"the {nameof(PatchConfig.PatchMode)} is invalid. Expected one of these values: [{string.Join(", ", Enum.GetNames(typeof(PatchMode)))}].");
 
                             // save
-                            if (!this.TryPrepareLocalAsset(pack, entry.FromFile, config, conditions, out string error, out TokenString fromAsset, shouldPreload: true))
+                            if (!this.TryPrepareLocalAsset(pack, entry.FromFile, tokenContext, migrator, out string error, out TokenString fromAsset))
                                 return TrackSkip(error);
                             patch = new EditImagePatch(entry.LogName, pack, assetName, conditions, fromAsset, entry.FromArea, entry.ToArea, patchMode, this.Monitor, this.Helper.Content.NormaliseAssetName);
                         }
@@ -393,14 +494,6 @@ namespace ContentPatcher
 
                     default:
                         return TrackSkip($"unsupported patch type '{action}'.");
-                }
-
-                // only apply patch when its tokens are available
-                HashSet<ConditionKey> tokensUsed = new HashSet<ConditionKey>(patch.GetTokensUsed());
-                foreach (ConditionKey key in tokensUsed)
-                {
-                    if (!patch.Conditions.ContainsKey(key))
-                        patch.Conditions.Add(key, patch.Conditions.GetValidValues(key));
                 }
 
                 // skip if not enabled
@@ -418,53 +511,177 @@ namespace ContentPatcher
             }
         }
 
-        /// <summary>Parse a boolean value from a string which can contain tokens, and validate that it's valid.</summary>
-        /// <param name="rawValue">The raw string which may contain tokens.</param>
-        /// <param name="config">The player configuration.</param>
-        /// <param name="error">An error phrase indicating why parsing failed (if applicable).</param>
-        /// <param name="parsed">The parsed value.</param>
-        private bool TryParseBoolean(string rawValue, InvariantDictionary<ConfigField> config, out string error, out bool parsed)
+        /// <summary>Normalise and parse the given condition values.</summary>
+        /// <param name="raw">The raw condition values to normalise.</param>
+        /// <param name="tokenContext">The tokens available for this content pack.</param>
+        /// <param name="migrator">The migrator which validates and migrates content pack data.</param>
+        /// <param name="conditions">The normalised conditions.</param>
+        /// <param name="error">An error message indicating why normalisation failed.</param>
+        private bool TryParseConditions(InvariantDictionary<string> raw, IContext tokenContext, IMigration migrator, out ConditionDictionary conditions, out string error)
         {
-            parsed = false;
+            conditions = new ConditionDictionary();
 
-            // parse tokens
-            if (!this.TryParseTokenString(rawValue, config, out error, out TokenStringBuilder builder))
-                return false;
-
-            // validate tokens
-            if (builder.HasAnyTokens)
+            // no conditions
+            if (raw == null || !raw.Any())
             {
-                // validate: no condition tokens allowed
-                if (builder.ConditionTokens.Any())
+                error = null;
+                return true;
+            }
+
+            // parse conditions
+            foreach (KeyValuePair<string, string> pair in raw)
+            {
+                // parse condition key
+                if (!TokenName.TryParse(pair.Key, out TokenName name))
                 {
-                    error = $"can't use condition tokens in a boolean field ({string.Join(", ", builder.ConditionTokens.OrderBy(p => p))}).";
+                    error = $"'{pair.Key}' isn't a valid token name";
+                    conditions = null;
                     return false;
                 }
 
-                // validate config tokens
-                if (builder.ConfigTokens.Any())
+                // apply migrations
+                if (!migrator.TryMigrate(ref name, out error))
                 {
-                    // max one tokem
-                    if (builder.ConfigTokens.Count > 1)
-                    {
-                        error = "can't use multiple tokens.";
-                        return false;
-                    }
+                    conditions = null;
+                    return false;
+                }
 
-                    // field isn't boolean
-                    string key = builder.ConfigTokens.First();
-                    ConfigField field = config[key];
-                    if (field.AllowValues.Except(new[] { "true", "false" }, StringComparer.InvariantCultureIgnoreCase).Any())
+                // get token
+                IToken token = tokenContext.GetToken(name, enforceContext: false);
+                if (token == null)
+                {
+                    error = $"'{pair.Key}' isn't a valid condition; must be one of {string.Join(", ", tokenContext.GetTokens(enforceContext: false).Select(p => p.Name).OrderBy(p => p))}";
+                    conditions = null;
+                    return false;
+                }
+
+                // validate subkeys
+                if (!token.CanHaveSubkeys)
+                {
+                    if (name.HasSubkey())
                     {
-                        error = $"can't use {{{{{key}}}}} because that config field isn't restricted to 'true' or 'false'.";
+                        error = $"{name.Key} conditions don't allow subkeys (:)";
+                        conditions = null;
                         return false;
                     }
                 }
+                else if (token.RequiresSubkeys)
+                {
+                    if (!name.HasSubkey())
+                    {
+                        error = $"{name.Key} conditions must specify a token subkey (see readme for usage)";
+                        conditions = null;
+                        return false;
+                    }
+                }
+
+                // parse values
+                InvariantHashSet values = this.ParseCommaDelimitedField(pair.Value);
+                if (!values.Any())
+                {
+                    error = $"{name} can't be empty";
+                    conditions = null;
+                    return false;
+                }
+
+                // restrict to allowed values
+                InvariantHashSet rawValidValues = token.GetAllowedValues(name);
+                if (rawValidValues?.Any() == true)
+                {
+                    InvariantHashSet validValues = new InvariantHashSet(rawValidValues);
+                    {
+                        string[] invalidValues = values.ExceptIgnoreCase(validValues).ToArray();
+                        if (invalidValues.Any())
+                        {
+                            error = $"invalid {name} values ({string.Join(", ", invalidValues)}); expected one of {string.Join(", ", validValues)}";
+                            conditions = null;
+                            return false;
+                        }
+                    }
+                }
+
+                // perform custom validation
+                if (!token.TryCustomValidation(values, out string customError))
+                {
+                    error = $"invalid {name} values: {customError}";
+                    conditions = null;
+                    return false;
+                }
+
+                // create condition
+                conditions[name] = new Condition(name, values);
             }
 
-            // parse value
-            TokenString tokenString = builder.Build();
-            if (!bool.TryParse(tokenString.Raw, out parsed))
+            // return parsed conditions
+            error = null;
+            return true;
+        }
+
+        /// <summary>Parse a comma-delimited set of case-insensitive condition values.</summary>
+        /// <param name="field">The field value to parse.</param>
+        public InvariantHashSet ParseCommaDelimitedField(string field)
+        {
+            if (string.IsNullOrWhiteSpace(field))
+                return new InvariantHashSet();
+
+            IEnumerable<string> values = (
+                from value in field.Split(',')
+                where !string.IsNullOrWhiteSpace(value)
+                select value.Trim()
+            );
+            return new InvariantHashSet(values);
+        }
+
+        /// <summary>Parse a boolean <see cref="PatchConfig.Enabled"/> value from a string which can contain tokens, and validate that it's valid.</summary>
+        /// <param name="rawValue">The raw string which may contain tokens.</param>
+        /// <param name="tokenContext">The tokens available for this content pack.</param>
+        /// <param name="migrator">The migrator which validates and migrates content pack data.</param>
+        /// <param name="error">An error phrase indicating why parsing failed (if applicable).</param>
+        /// <param name="parsed">The parsed value.</param>
+        private bool TryParseEnabled(string rawValue, IContext tokenContext, IMigration migrator, out string error, out bool parsed)
+        {
+            parsed = false;
+
+            // analyse string
+            if (!this.TryParseTokenString(rawValue, tokenContext, migrator, out error, out TokenString tokenString))
+                return false;
+
+            // validate & extract tokens
+            string text = rawValue;
+            if (tokenString.HasAnyTokens)
+            {
+                // only one token allowed
+                if (!tokenString.IsSingleTokenOnly)
+                {
+                    error = "can't be treated as a true/false value because it contains multiple tokens.";
+                    return false;
+                }
+
+                // check token options
+                TokenName tokenName = tokenString.Tokens.First();
+                IToken token = tokenContext.GetToken(tokenName, enforceContext: false);
+                InvariantHashSet allowedValues = token?.GetAllowedValues(tokenName);
+                if (token == null || token.IsMutable || !token.IsValidInContext)
+                {
+                    error = $"can only use static tokens in this field, consider using a {nameof(PatchConfig.When)} condition instead.";
+                    return false;
+                }
+                if (allowedValues == null || !allowedValues.All(p => bool.TryParse(p, out _)))
+                {
+                    error = "that token isn't restricted to 'true' or 'false'.";
+                    return false;
+                }
+                if (token.CanHaveMultipleValues(tokenName))
+                {
+                    error = "can't be treated as a true/false value because that token can have multiple values.";
+                    return false;
+                }
+
+                text = token.GetValues(tokenName).First();
+            }
+
+            // parse text
+            if (!bool.TryParse(text, out parsed))
             {
                 error = $"can't parse {tokenString.Raw} as a true/false value.";
                 return false;
@@ -474,36 +691,44 @@ namespace ContentPatcher
 
         /// <summary>Parse a string which can contain tokens, and validate that it's valid.</summary>
         /// <param name="rawValue">The raw string which may contain tokens.</param>
-        /// <param name="config">The player configuration.</param>
+        /// <param name="tokenContext">The tokens available for this content pack.</param>
+        /// <param name="migrator">The migrator which validates and migrates content pack data.</param>
         /// <param name="error">An error phrase indicating why parsing failed (if applicable).</param>
         /// <param name="parsed">The parsed value.</param>
-        private bool TryParseTokenString(string rawValue, InvariantDictionary<ConfigField> config, out string error, out TokenStringBuilder parsed)
+        private bool TryParseTokenString(string rawValue, IContext tokenContext, IMigration migrator, out string error, out TokenString parsed)
         {
             // parse
-            TokenStringBuilder builder = new TokenStringBuilder(rawValue, config);
+            parsed = new TokenString(rawValue, tokenContext);
+            if (!migrator.TryMigrate(ref parsed, out error))
+                return false;
 
             // validate unknown tokens
-            if (builder.InvalidTokens.Any())
+            if (parsed.InvalidTokens.Any())
             {
+                error = $"found unknown tokens ({string.Join(", ", parsed.InvalidTokens.OrderBy(p => p))})";
                 parsed = null;
-                error = $"found unknown tokens: {string.Join(", ", builder.InvalidTokens.OrderBy(p => p))}";
                 return false;
             }
 
-            // validate config tokens
-            foreach (string key in builder.ConfigTokens)
+            // validate tokens
+            foreach (TokenName tokenName in parsed.Tokens)
             {
-                ConfigField field = config[key];
-                if (field.AllowMultiple)
+                IToken token = tokenContext.GetToken(tokenName, enforceContext: false);
+                if (token == null)
                 {
+                    error = $"{{{{{tokenName}}}}} can't be used as a token because that token could not be found."; // should never happen
                     parsed = null;
-                    error = $"token {{{{{key}}}}} can't be used because that config field allows multiple values.";
+                    return false;
+                }
+                if (token.CanHaveMultipleValues(tokenName))
+                {
+                    error = $"{{{{{tokenName}}}}} can't be used as a token because it can have multiple values.";
+                    parsed = null;
                     return false;
                 }
             }
 
             // looks OK
-            parsed = builder;
             error = null;
             return true;
         }
@@ -512,13 +737,12 @@ namespace ContentPatcher
         /// <summary>Prepare a local asset file for a patch to use.</summary>
         /// <param name="pack">The content pack being loaded.</param>
         /// <param name="path">The asset path in the content patch.</param>
-        /// <param name="config">The config values to apply.</param>
-        /// <param name="conditions">The conditions to apply.</param>
+        /// <param name="tokenContext">The tokens available for this content pack.</param>
+        /// <param name="migrator">The migrator which validates and migrates content pack data.</param>
         /// <param name="error">The error reason if preparing the asset fails.</param>
         /// <param name="tokenedPath">The parsed value.</param>
-        /// <param name="shouldPreload">Whether to preload assets if needed.</param>
         /// <returns>Returns whether the local asset was successfully prepared.</returns>
-        private bool TryPrepareLocalAsset(ManagedContentPack pack, string path, InvariantDictionary<ConfigField> config, ConditionDictionary conditions, out string error, out TokenString tokenedPath, bool shouldPreload)
+        private bool TryPrepareLocalAsset(ManagedContentPack pack, string path, IContext tokenContext, IMigration migrator, out string error, out TokenString tokenedPath)
         {
             // normalise raw value
             path = this.NormaliseLocalAssetPath(pack, path);
@@ -530,28 +754,9 @@ namespace ContentPatcher
             }
 
             // tokenise
-            if (!this.TryParseTokenString(path, config, out string tokenError, out TokenStringBuilder builder))
+            if (!this.TryParseTokenString(path, tokenContext, migrator, out string tokenError, out tokenedPath))
             {
                 error = $"the {nameof(PatchConfig.FromFile)} is invalid: {tokenError}";
-                tokenedPath = null;
-                return false;
-            }
-            tokenedPath = builder.Build();
-
-            // preload & validate possible file paths
-            InvariantHashSet missingFiles = new InvariantHashSet();
-            foreach (string localKey in this.ConditionFactory.GetPossibleStrings(tokenedPath, conditions))
-            {
-                if (!pack.FileExists(localKey))
-                    missingFiles.Add(localKey);
-                else if (shouldPreload)
-                    pack.PreloadIfNeeded(localKey);
-            }
-            if (missingFiles.Any())
-            {
-                error = tokenedPath.ConditionTokens.Any() || missingFiles.Count > 1
-                    ? $"{nameof(PatchConfig.FromFile)} '{path}' matches files which don't exist ({string.Join(", ", missingFiles.OrderBy(p => p))})."
-                    : $"{nameof(PatchConfig.FromFile)} '{path}' matches a file which doesn't exist.";
                 tokenedPath = null;
                 return false;
             }
@@ -580,15 +785,6 @@ namespace ContentPatcher
             }
 
             return newPath;
-        }
-
-        /// <summary>Log a message if <see cref="ModConfig.VerboseLog"/> is enabled.</summary>
-        /// <param name="message">The message to log.</param>
-        /// <param name="level">The log level.</param>
-        private void VerboseLog(string message, LogLevel level = LogLevel.Trace)
-        {
-            if (this.Config.VerboseLog)
-                this.Monitor.Log(message, level);
         }
     }
 }

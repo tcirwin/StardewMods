@@ -1,6 +1,23 @@
 [← back to readme](README.md)
 
 # Release notes
+## Upcoming release
+* Fixed fences not working as connectors.
+
+## 1.10.6
+* Migrated verbose logs to SMAPI's verbose logging feature.
+
+## 1.10.5
+* Updated for SMAPI 2.8-beta.5.
+* Fixed error if a mill contains an unrecognised item.
+
+## 1.10.4
+* Added option to disable shipping bin automation.
+* Fixed compatibility issue with More Buildings mod.
+
+## 1.10.2
+* Updated for Stardew Valley 1.3.29.
+
 ## 1.10.1
 * Fixed error with some machines if they have null output slots.
 

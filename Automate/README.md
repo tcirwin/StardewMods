@@ -31,9 +31,9 @@ This can be used to automate...
 * [crystalariums](http://stardewvalleywiki.com/Crystalarium);
 * [fruit trees](http://stardewvalleywiki.com/Fruit_Trees);
 * [furnaces](http://stardewvalleywiki.com/Furnace);
+* [garbage cans](http://stardewvalleywiki.com/Garbage_Can);
 * [hay hoppers](http://stardewvalleywiki.com/Hay_Hopper);
 * [Junimo huts](http://stardewvalleywiki.com/Junimo_Hut);
-* [garbage cans](http://stardewvalleywiki.com/Garbage_Can);
 * [incubators (for eggs)](https://stardewvalleywiki.com/Incubator);
 * [kegs](http://stardewvalleywiki.com/Keg);
 * [lightning rods](http://stardewvalleywiki.com/Lightning_Rod);
@@ -45,10 +45,13 @@ This can be used to automate...
 * [preserves jars](http://stardewvalleywiki.com/Preserves_Jar);
 * [recycling machines](http://stardewvalleywiki.com/Recycling_Machine);
 * [seed makers](http://stardewvalleywiki.com/Seed_Maker);
-* shipping bins;
+* shipping bins (can be disabled in `config.json`);
 * [silos](http://stardewvalleywiki.com/Silo);
 * [slime egg-presses](http://stardewvalleywiki.com/Slime_Egg);
 * [slime incubators](https://stardewvalleywiki.com/Slime_Incubator);
+* [soda machines](https://stardewvalleywiki.com/Soda_Machine);
+* [statues of endless fortune](https://stardewvalleywiki.com/Statue_Of_Endless_Fortune);
+* [statues of perfection](https://stardewvalleywiki.com/Statue_of_Perfection);
 * [tappers](http://stardewvalleywiki.com/Tapper);
 * and [worm bins](http://stardewvalleywiki.com/Worm_Bin).
 
@@ -94,27 +97,57 @@ You can increase production by just adding more machines.
 ### Connectors
 Connectors are placed objects or flooring which connect adjacent machines together. Automate doesn't
 have any connectors by default, but you can edit the `config.json` to specify what should be treated
-as connectors (see _[custom connectors](#custom-connectors)_ below).
+as connectors (see _[configure](#configure)_ below).
 
 > ![](screenshots/connectors.png)
 
 ## Configure
-### Overview
-The mod will work fine out of the box, but you can tweak its settings by editing the `config.json`
-file if you want. These are the available settings:
+### config.json
+The mod creates a `config.json` file in its mod folder the first time you run it. You can open that
+file in a text editor to configure the mod.
 
-setting           | what it affects
------------------ | -------------------
-`Controls` | The configured controller, keyboard, and mouse buttons (see [key bindings](https://stardewvalleywiki.com/Modding:Key_bindings)). You can separate multiple buttons with commas. The default value is `U` to toggle the automation overlay.
-`AutomationInterval` | Default `60`. The number of update ticks between each automation cycle (one second is ≈60 ticks).
-`Connectors` | Default empty. A list of world object to treat as [connectors](#connectors).
-`VerboseLogging` | Default `false`. Whether to write more detailed information about what the mod is doing to the log file. This is useful for troubleshooting, but may impact performance and should generally be disabled.
+These are the available settings:
 
-### Custom connectors
-[Connectors](#connectors) are placed objects or flooring which connect adjacent machines
-together. Automate has no connectors by default, but you can edit the `Connectors` field in the
-`config.json` file to configure any object, craftable, or floor as a connector. Each one should be
-specified with a type (one of `Floor`, `BigCraftable`, or `Object`) and ID.
+<table>
+<tr>
+  <th>setting</th>
+  <th>what it affects</th>
+</tr>
+<tr>
+<tr>
+  <td><code>Controls</code></td>
+  <td>
+
+The configured controller, keyboard, and mouse buttons (see [key bindings](https://stardewvalleywiki.com/Modding:Key_bindings)).
+You can separate multiple buttons with commas. The default value is `U` to toggle the automation
+overlay.
+
+  </td>
+</tr>
+<tr>
+  <td><code>AutomateShippingBin</code></td>
+  <td>
+
+Default `true`. Whether the shipping bin should automatically pull items out of connected chests.
+
+  </td>
+</tr>
+<tr>
+  <td><code>AutomationInterval</code></td>
+  <td>
+
+Default `60`. The number of update ticks between each automation cycle (one second is ≈60 ticks).
+
+  </td>
+</tr>
+<tr>
+  <td><code>Connectors</code></td>
+  <td>
+
+Default empty. A list of world object to treat as [connectors](#connectors), which connect adjacent
+machines together. Automate has no connectors by default, but you can edit this field to configure
+any object, craftable, or floor as a connector. Each one should be specified with a type (one of
+`Floor`, `BigCraftable`, or `Object`) and ID.
 
 For example, this adds the Wood and Crystal Paths as connectors:
 ```js
@@ -130,6 +163,10 @@ Valid IDs:
 * floor IDs: 0 (Wood Floor), 1 (Stone Floor), 2 (Weathered Floor), 3 (Crystal Floor), 4 (Straw
   Floor), 5 (Gravel Path), 6 (Wood Path), 7 (Crystal Path), 8 (Cobblestone Path), and 9 (Stepping
   Stone Path).
+
+  </td>
+</tr>
+</table>
 
 ### In-game settings
 Installing [Chests Anywhere](https://www.nexusmods.com/stardewvalley/mods/518) too lets you set

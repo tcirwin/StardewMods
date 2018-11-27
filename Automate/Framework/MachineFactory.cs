@@ -28,6 +28,9 @@ namespace Pathoschild.Stardew.Automate.Framework
         /// <summary>The object IDs through which machines can connect, but which have no other automation properties.</summary>
         private readonly IDictionary<ObjectType, HashSet<int>> Connectors;
 
+        /// <summary>Whether to treat the shipping bin as a machine that can be automated.</summary>
+        private readonly bool AutomateShippingBin;
+
         /// <summary>The tile area on the farm matching the shipping bin.</summary>
         private readonly Rectangle ShippingBinArea = new Rectangle(71, 14, 2, 1);
 
@@ -37,11 +40,13 @@ namespace Pathoschild.Stardew.Automate.Framework
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="connectors">The objects through which machines can connect, but which have no other automation properties.</param>
-        public MachineFactory(ModConfigObject[] connectors)
+        /// <param name="automateShippingBin">Whether to treat the shipping bin as a machine that can be automated.</param>
+        public MachineFactory(ModConfigObject[] connectors, bool automateShippingBin)
         {
             this.Connectors = connectors
                 .GroupBy(connector => connector.Type)
                 .ToDictionary(group => group.Key, group => new HashSet<int>(group.Select(p => p.ID)));
+            this.AutomateShippingBin = automateShippingBin;
         }
 
         /// <summary>Get all machine groups in a location.</summary>
@@ -307,22 +312,18 @@ namespace Pathoschild.Stardew.Automate.Framework
         /// <param name="location">The location containing the machine.</param>
         private IMachine GetMachine(Building building, BuildableGameLocation location)
         {
-            if (location is Farm farm)
-            {
-                if (building is JunimoHut hut)
-                    return new JunimoHutMachine(hut);
-                if (building is Coop coop)
-                    return new CoopMachine(coop);
-                if (building is Barn barn)
-                    return new FarmAnimalMachine(farm, barn);
-                if (building is Mill mill)
-                    return new MillMachine(mill);
-                if (building is ShippingBin)
-                    return new ShippingBinMachine(farm);
-                if (building.buildingType == "Silo")
-                    return new FeedHopperMachine();
-            }
-
+            if (building is JunimoHut hut)
+                return new JunimoHutMachine(hut);
+            if (building is Mill mill)
+                return new MillMachine(mill);
+            if (this.AutomateShippingBin && location is Farm farm && building is ShippingBin)
+                return new ShippingBinMachine(farm);
+            if (building.buildingType.Value == "Silo")
+                return new FeedHopperMachine();
+            if (building is Coop coop)
+                return new CoopMachine(coop);
+            if (building is Barn barn)
+                return new FarmAnimalMachine(farm, barn);
             return null;
         }
 
@@ -336,7 +337,7 @@ namespace Pathoschild.Stardew.Automate.Framework
         private bool TryGetTileMachine(GameLocation location, Vector2 tile, IReflectionHelper reflection, out IMachine machine, out Vector2 size)
         {
             // shipping bin
-            if (location is Farm farm && (int)tile.X == this.ShippingBinArea.X && (int)tile.Y == this.ShippingBinArea.Y)
+            if (this.AutomateShippingBin && location is Farm farm && (int)tile.X == this.ShippingBinArea.X && (int)tile.Y == this.ShippingBinArea.Y)
             {
                 machine = new ShippingBinMachine(farm);
                 size = new Vector2(this.ShippingBinArea.Width, this.ShippingBinArea.Height);
@@ -406,7 +407,7 @@ namespace Pathoschild.Stardew.Automate.Framework
 
             // check for possible connectors
             if (location.Objects.TryGetValue(tile, out SObject obj))
-                return this.IsConnector(obj.bigCraftable.Value ? ObjectType.BigCraftable : ObjectType.Object, obj.ParentSheetIndex);
+                return this.IsConnector(obj.bigCraftable.Value ? ObjectType.BigCraftable : ObjectType.Object, this.GetItemID(obj));
             if (location.terrainFeatures.TryGetValue(tile, out TerrainFeature terrainFeature) && terrainFeature is Flooring floor)
                 return this.IsConnector(ObjectType.Floor, floor.whichFloor.Value);
             return false;
@@ -421,6 +422,30 @@ namespace Pathoschild.Stardew.Automate.Framework
                 return false;
 
             return this.Connectors.TryGetValue(type, out HashSet<int> ids) && ids.Contains(id);
+        }
+
+        /// <summary>Get the object ID for a given object.</summary>
+        /// <param name="obj">The object instance.</param>
+        private int GetItemID(SObject obj)
+        {
+            // get object ID from fence ID
+            if (obj is Fence fence)
+            {
+                switch (fence.whichType.Value)
+                {
+                    case Fence.wood:
+                        return 322;
+                    case Fence.stone:
+                        return 323;
+                    case Fence.steel:
+                        return 324;
+                    case Fence.gold:
+                        return 298;
+                }
+            }
+
+            // else obj ID
+            return obj.ParentSheetIndex;
         }
     }
 }
