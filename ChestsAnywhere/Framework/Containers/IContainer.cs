@@ -11,7 +11,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
         ** Accessors
         *********/
         /// <summary>The underlying inventory.</summary>
-        List<Item> Inventory { get; }
+        IList<Item> Inventory { get; }
 
         /// <summary>The container's name.</summary>
         string Name { get; set; }
@@ -29,9 +29,6 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
         /*********
         ** Public methods
         *********/
-        /// <summary>Get whether the in-game container is open.</summary>
-        bool IsOpen();
-
         /// <summary>Get whether the container has its default name.</summary>
         bool HasDefaultName();
 
@@ -45,7 +42,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
 
         /// <summary>Get whether another instance wraps the same underlying container.</summary>
         /// <param name="inventory">The other container's inventory.</param>
-        bool IsSameAs(List<Item> inventory);
+        bool IsSameAs(IList<Item> inventory);
 
         /// <summary>Open a menu to transfer items between the player's inventory and this container.</summary>
         ItemGrabMenu OpenMenu();

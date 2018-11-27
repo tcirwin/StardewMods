@@ -1,6 +1,16 @@
 [← back to readme](README.md)
 
 # Release notes
+## 1.2
+* Updated for Stardew Valley 1.3 (including multiplayer support).
+
+## 1.1.1
+* Fixed crabpot error in 1.1.
+
+## 1.1
+* Updated to SMAPI 2.4.
+* After 2am, you can now catch any in-season fish.
+
 ## 1.0.2
 * Updated to SMAPI 2.0.
 * Switched to SMAPI update checks.

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Pathoschild.Stardew.Common;
 using Pathoschild.Stardew.DebugMode.Framework;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
@@ -56,7 +58,7 @@ namespace Pathoschild.Stardew.DebugMode
 
             // hook events
             InputEvents.ButtonPressed += this.InputEvents_ButtonPressed;
-            LocationEvents.CurrentLocationChanged += this.LocationEvents_CurrentLocationChanged;
+            PlayerEvents.Warped += this.PlayerEvents_Warped;
             GraphicsEvents.OnPostRenderEvent += this.GraphicsEvents_OnPostRenderEvent;
 
             // validate translations
@@ -100,7 +102,7 @@ namespace Pathoschild.Stardew.DebugMode
         /// <summary>The method invoked when the player warps into a new location.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event data.</param>
-        private void LocationEvents_CurrentLocationChanged(object sender, EventArgsCurrentLocationChanged e)
+        private void PlayerEvents_Warped(object sender, EventArgsPlayerWarped e)
         {
             if (this.DebugMode)
                 this.CorrectEntryPosition(e.NewLocation, Game1.player);
@@ -143,7 +145,7 @@ namespace Pathoschild.Stardew.DebugMode
             if (player.getTileX() == (int)fromTile.X && player.getTileY() == (int)fromTile.Y)
             {
                 player.Position = new Vector2(toTile.X * Game1.tileSize, toTile.Y * Game1.tileSize);
-                player.facingDirection = (int)facingDirection;
+                player.FacingDirection = (int)facingDirection;
                 player.setMovingInFacingDirection();
             }
         }
@@ -165,27 +167,78 @@ namespace Pathoschild.Stardew.DebugMode
             // draw debug info at cursor position
             {
                 // get cursor position
-                Vector2 tile = Game1.currentCursorTile;
                 Vector2 position = new Vector2(Game1.getOldMouseX(), Game1.getOldMouseY());
 
                 // generate debug text
-                GameLocation location = Game1.currentLocation;
-                Type menuType = Game1.activeClickableMenu?.GetType();
-                string[] lines = {
-                    location != null ? $"{this.Helper.Translation.Get("label.tile")}: {tile.X}, {tile.Y}" : null,
-                    location != null ? $"{this.Helper.Translation.Get("label.map")}:  {location.Name}" : null,
-                    menuType != null ? $"{this.Helper.Translation.Get("label.menu")}: {(menuType.Namespace == typeof(TitleMenu).Namespace ? menuType.Name : menuType.FullName)}" : null
-                };
+                string[] lines = this.GetDebugInfo().ToArray();
 
                 // draw text
                 string text = string.Join(Environment.NewLine, lines.Where(p => p != null));
                 Vector2 textSize = font.MeasureString(text);
-                batch.DrawString(font, text, new Vector2(position.X - textSize.X, position.Y), Color.Red);
+                const int scrollPadding = 5;
+                CommonHelper.DrawScroll(batch, new Vector2(position.X - textSize.X - (scrollPadding * 2) - (CommonHelper.ScrollEdgeSize.X * 2), position.Y), textSize, out Vector2 contentPos, out Rectangle _, padding: scrollPadding);
+                batch.DrawString(font, text, new Vector2(contentPos.X, contentPos.Y), Color.Black);
             }
 
             // draw cursor crosshairs
             batch.Draw(pixel, new Rectangle(0, Game1.getOldMouseY() - 1, Game1.viewport.Width, 3), Color.Black * 0.5f);
             batch.Draw(pixel, new Rectangle(Game1.getOldMouseX() - 1, 0, 3, Game1.viewport.Height), Color.Black * 0.5f);
+        }
+
+        /// <summary>Get debug info for the current context.</summary>
+        private IEnumerable<string> GetDebugInfo()
+        {
+            // location
+            if (Game1.currentLocation != null)
+            {
+                Vector2 tile = Game1.currentCursorTile;
+
+                yield return $"{this.Helper.Translation.Get("label.tile")}: {tile.X}, {tile.Y}";
+                yield return $"{this.Helper.Translation.Get("label.map")}:  {Game1.currentLocation.Name}";
+            }
+
+            // menu
+            if (Game1.activeClickableMenu != null)
+            {
+                Type menuType = Game1.activeClickableMenu.GetType();
+                Type submenuType = this.GetSubmenu(Game1.activeClickableMenu)?.GetType();
+                string vanillaNamespace = typeof(TitleMenu).Namespace;
+
+                yield return $"{this.Helper.Translation.Get("label.menu")}: {(menuType.Namespace == vanillaNamespace ? menuType.Name : menuType.FullName)}";
+                if (submenuType != null)
+                    yield return $"{this.Helper.Translation.Get("label.submenu")}: {(submenuType.Namespace == vanillaNamespace ? submenuType.Name : submenuType.FullName)}";
+            }
+
+            // event
+            if (Game1.CurrentEvent != null)
+            {
+                Event @event = Game1.CurrentEvent;
+                int eventID = this.Helper.Reflection.GetField<int>(@event, "id").GetValue();
+                bool isFestival = @event.isFestival;
+                string festivalName = @event.FestivalName;
+                double progress = @event.CurrentCommand / (double)@event.eventCommands.Length;
+
+                if (isFestival)
+                    yield return $"{this.Helper.Translation.Get("label.festival-name")}: {festivalName}";
+                else
+                {
+                    yield return $"{this.Helper.Translation.Get("label.event-id")}: {eventID}";
+                    if (@event.CurrentCommand >= 0 && @event.CurrentCommand < @event.eventCommands.Length)
+                        yield return $"{this.Helper.Translation.Get("label.event-script")}: {@event.eventCommands[@event.CurrentCommand]} ({(int)(progress * 100)}%)";
+                }
+            }
+        }
+
+        /// <summary>Get the submenu for the current menu, if any.</summary>
+        /// <param name="menu">The submenu.</param>
+        private IClickableMenu GetSubmenu(IClickableMenu menu)
+        {
+            if (menu is GameMenu gameMenu)
+                return this.Helper.Reflection.GetField<List<IClickableMenu>>(menu, "pages").GetValue()[gameMenu.currentTab];
+            if (menu is TitleMenu)
+                return TitleMenu.subMenu;
+
+            return null;
         }
     }
 }

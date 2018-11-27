@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
@@ -79,6 +79,7 @@ namespace Pathoschild.Stardew.LookupAnything.Components
         ** Constructors
         ****/
         /// <summary>Construct an instance.</summary>
+        /// <param name="gameHelper">Provides utility methods for interacting with the game code.</param>
         /// <param name="subject">The metadata to display.</param>
         /// <param name="metadata">Provides metadata that's not available from the game data directly.</param>
         /// <param name="monitor">Encapsulates logging and monitoring.</param>
@@ -86,7 +87,7 @@ namespace Pathoschild.Stardew.LookupAnything.Components
         /// <param name="scroll">The amount to scroll long content on each up/down scroll.</param>
         /// <param name="showDebugFields">Whether to display debug fields.</param>
         /// <param name="showNewPage">A callback which shows a new lookup for a given subject.</param>
-        public LookupMenu(ISubject subject, Metadata metadata, IMonitor monitor, IReflectionHelper reflectionHelper, int scroll, bool showDebugFields, Action<ISubject> showNewPage)
+        public LookupMenu(GameHelper gameHelper, ISubject subject, Metadata metadata, IMonitor monitor, IReflectionHelper reflectionHelper, int scroll, bool showDebugFields, Action<ISubject> showNewPage)
         {
             // save data
             this.Subject = subject;
@@ -103,8 +104,8 @@ namespace Pathoschild.Stardew.LookupAnything.Components
                 this.Fields = this.Fields
                     .Concat(new[]
                     {
-                        new DataMiningField("debug (pinned)", debugFields.Where(p => p.IsPinned)),
-                        new DataMiningField("debug (raw)", debugFields.Where(p => !p.IsPinned))
+                        new DataMiningField(gameHelper, "debug (pinned)", debugFields.Where(p => p.IsPinned)),
+                        new DataMiningField(gameHelper, "debug (raw)", debugFields.Where(p => !p.IsPinned))
                     })
                     .ToArray();
             }
@@ -242,9 +243,9 @@ namespace Pathoschild.Stardew.LookupAnything.Components
                 // you can look up anyway is the farmer.)
                 if (!this.ValidatedDrawMode)
                 {
-                    IPrivateField<SpriteSortMode> sortModeField =
-                        this.Reflection.GetPrivateField<SpriteSortMode>(Game1.spriteBatch, "spriteSortMode", required: false) // XNA
-                        ?? this.Reflection.GetPrivateField<SpriteSortMode>(Game1.spriteBatch, "_sortMode"); // MonoGame
+                    IReflectedField<SpriteSortMode> sortModeField =
+                        this.Reflection.GetField<SpriteSortMode>(Game1.spriteBatch, "spriteSortMode", required: false) // XNA
+                        ?? this.Reflection.GetField<SpriteSortMode>(Game1.spriteBatch, "_sortMode"); // MonoGame
                     if (sortModeField.GetValue() == SpriteSortMode.Immediate)
                     {
                         this.Monitor.Log("Aborted the lookup because the game's current rendering mode isn't compatible with the mod's UI. This only happens in rare cases (e.g. the Stardew Valley Fair).", LogLevel.Warn);

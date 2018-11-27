@@ -14,6 +14,9 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
         /// <summary>The in-game chest.</summary>
         private readonly Chest Chest;
 
+        /// <summary>The <see cref="ItemGrabMenu.context"/> value which indicates what opened the menu.</summary>
+        private readonly object Context;
+
         /// <summary>The callback to invoke when an item is selected in the player inventory.</summary>
         private ItemGrabMenu.behaviorOnItemSelect GrabItemFromInventory => this.Chest.grabItemFromInventory;
 
@@ -25,7 +28,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
         ** Accessors
         *********/
         /// <summary>The underlying inventory.</summary>
-        public List<Item> Inventory => this.Chest.items;
+        public IList<Item> Inventory => this.Chest.items;
 
         /// <summary>The container's name.</summary>
         public string Name
@@ -49,19 +52,15 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="chest">The in-game chest.</param>
+        /// <param name="context">The <see cref="ItemGrabMenu.context"/> value which indicates what opened the menu.</param>
         /// <param name="isEditable">Whether the player can configure the container.</param>
         /// <param name="isChest">Whether to enable chest-specific UI.</param>
-        public ChestContainer(Chest chest, bool isEditable = true, bool isChest = true)
+        public ChestContainer(Chest chest, object context, bool isEditable = true, bool isChest = true)
         {
             this.Chest = chest;
+            this.Context = context;
             this.IsEditable = isEditable;
             this.IsChest = isChest;
-        }
-
-        /// <summary>Get whether the in-game container is open.</summary>
-        public bool IsOpen()
-        {
-            return this.Chest.currentLidFrame == 135;
         }
 
         /// <summary>Get whether the container has its default name.</summary>
@@ -86,9 +85,9 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
 
         /// <summary>Get whether another instance wraps the same underlying container.</summary>
         /// <param name="inventory">The other container's inventory.</param>
-        public bool IsSameAs(List<Item> inventory)
+        public bool IsSameAs(IList<Item> inventory)
         {
-            return this.Inventory == inventory;
+            return object.ReferenceEquals(this.Inventory, inventory);
         }
 
         /// <summary>Open a menu to transfer items between the player's inventory and this chest.</summary>
@@ -105,7 +104,8 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework.Containers
                 behaviorOnItemGrab: this.GrabItemFromContainer,
                 canBeExitedWithKey: true,
                 showOrganizeButton: true,
-                source: ItemGrabMenu.source_chest
+                source: ItemGrabMenu.source_chest,
+                context: this.Context
             );
         }
     }

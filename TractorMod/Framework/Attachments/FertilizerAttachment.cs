@@ -1,4 +1,5 @@
 using Microsoft.Xna.Framework;
+using Pathoschild.Stardew.TractorMod.Framework.Config;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using SFarmer = StardewValley.Farmer;
@@ -10,8 +11,22 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class FertilizerAttachment : BaseAttachment
     {
         /*********
+        ** Properties
+        *********/
+        /// <summary>The attachment settings.</summary>
+        private readonly FertilizerConfig Config;
+
+
+        /*********
         ** Public methods
         *********/
+        /// <summary>Construct an instance.</summary>
+        /// <param name="config">The attachment settings.</param>
+        public FertilizerAttachment(FertilizerConfig config)
+        {
+            this.Config = config;
+        }
+
         /// <summary>Get whether the tool is currently enabled.</summary>
         /// <param name="player">The current player.</param>
         /// <param name="tool">The tool selected by the player (if any).</param>
@@ -19,7 +34,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="location">The current location.</param>
         public override bool IsEnabled(SFarmer player, Tool tool, Item item, GameLocation location)
         {
-            return item?.category == SObject.fertilizerCategory;
+            return this.Config.Enable && item?.Category == SObject.fertilizerCategory;
         }
 
         /// <summary>Apply the tool to the given tile.</summary>
@@ -36,12 +51,15 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
                 return false;
 
             // get dirt
-            HoeDirt dirt = tileFeature as HoeDirt;
-            if (dirt == null || dirt.fertilizer != HoeDirt.noFertilizer)
+            if (!(tileFeature is HoeDirt dirt) || dirt.fertilizer.Value != HoeDirt.noFertilizer)
+                return false;
+
+            // ignore if there's a giant crop, meteorite, etc covering the tile
+            if (this.GetResourceClumpCoveringTile(location, tile) != null)
                 return false;
 
             // apply fertiliser
-            dirt.fertilizer = item.parentSheetIndex;
+            dirt.fertilizer.Value = item.ParentSheetIndex;
             this.ConsumeItem(player, item);
             return true;
         }

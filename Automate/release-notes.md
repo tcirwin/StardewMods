@@ -1,6 +1,26 @@
 [← back to readme](README.md)
 
 # Release notes
+## 1.10.1
+* Fixed error with some machines if they have null output slots.
+
+## 1.10
+* Updated for Stardew Valley 1.3, including...
+  * multiplayer support;
+  * support for auto-grabbers;
+  * support for buildable shipping bins;
+  * new fire quartz in furnace recipe.
+* Added optional connectors (e.g. connect machines using paths).
+* Added support for ignoring specific chests.
+* Fixed various bugs related to multi-tile machines (e.g. buildings).
+* **Breaking change:** to prefer a chest for output, add `|automate:output|` to the chest name instead of just `output`.
+
+## 1.9.1
+* Updated to SMAPI 2.4.
+* Fixed bee houses in custom locations not using nearby flowers.
+* Fixed Jodi's trash can not being automated.
+* Fixed crab pots not updating sprite when baited automatically.
+
 ## 1.9
 * Updated to SMAPI 2.3.
 * Added a predictable order for chests receiving machine output. <small>(Items are now pushed into chests with `output` in the name first, then chests that already have that item type, then any other connected chest.)</small>

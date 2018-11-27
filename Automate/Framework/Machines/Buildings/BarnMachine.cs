@@ -7,6 +7,10 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using SObject = StardewValley.Object;
 using SGame = StardewValley.Game1;
+using StardewValley.Tools;
+using StardewValley.Characters;
+using System.Reflection;
+using Netcode;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 {
@@ -14,17 +18,13 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
     {
         private readonly AnimalHouse AnimalHouse = null;
         protected List<FarmAnimal> UnprocessedAnimals;
-
-        private static readonly Dictionary<string, string> HarvestTextures = new Dictionary<string, string>
-        {
-            { "Sheep", "ShearedSheep" }
-        };
+        private int produceCount = 0;
 
         public BarnMachine(Barn barn)
         {
-            if (barn.indoors is AnimalHouse)
-                this.AnimalHouse = (AnimalHouse)barn.indoors;
-
+            if (barn.indoors.Value is AnimalHouse)
+                this.AnimalHouse = (AnimalHouse)barn.indoors.Value;
+            
             this.UnprocessedAnimals = new List<FarmAnimal>();
             this.FindUnprocessedAnimals();
         }
@@ -39,26 +39,30 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         public ITrackedStack GetOutput()
         {
             FarmAnimal animal = this.UnprocessedAnimals.FirstOrDefault();
+            if (animal == null)
+            {
+                return null;
+            }
             this.UnprocessedAnimals.RemoveAt(0);
-            this.ShowHarvestedTexture(animal);
+            Tool tool = new Shears();
+
+            if (animal.toolUsedForHarvest == "Milk Pail")
+                tool = new MilkPail();
 
             var produce = new SObject(animal.currentProduce, 1, false, -1, animal.produceQuality);
-            return new TrackedItem(produce, _ => animal.currentProduce = -1);
+
+            FieldInfo info = typeof(FarmAnimal).GetField("currentProduce", BindingFlags.Instance | BindingFlags.Public);
+            NetInt netint = new NetInt(-1);
+            info.SetValue(animal, netint);
+
+            this.produceCount += 1;
+
+            return new TrackedItem(produce);
         }
 
         public bool SetInput(IStorage input)
         {
             return false; // no inputs
-        }
-
-        private void ShowHarvestedTexture(FarmAnimal animal)
-        {
-            HarvestTextures.TryGetValue(animal.type, out string textureName);
-            if (textureName != default(string) && animal.showDifferentTextureWhenReadyForHarvest)
-            {
-                string texturePath = Path.Combine("Animals", textureName);
-                animal.Sprite.Texture = SGame.content.Load<Texture2D>(texturePath);
-            }
         }
 
         private void FindUnprocessedAnimals()

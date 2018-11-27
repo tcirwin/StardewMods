@@ -1,6 +1,5 @@
 using System;
 using StardewValley;
-using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework
 {
@@ -43,7 +42,7 @@ namespace Pathoschild.Stardew.Automate.Framework
         /// <param name="onEmpty">The callback invoked when the stack is empty.</param>
         public TrackedItem(Item item, Action<Item> onReduced = null, Action<Item> onEmpty = null)
         {
-            this.Item = item;
+            this.Item = item ?? throw new InvalidOperationException("Can't track a null item stack.");
             this.Sample = this.GetNewStack(item);
             this.LastStackSize = item?.Stack ?? 0;
             this.OnReduced = onReduced;
@@ -97,17 +96,6 @@ namespace Pathoschild.Stardew.Automate.Framework
 
             Item stack = original.getOne();
             stack.Stack = stackSize;
-
-            if (original is SObject originalObj && stack is SObject stackObj)
-            {
-                // fix some fields not copied by getOne()
-                stackObj.name = originalObj.name;
-                stackObj.DisplayName = originalObj.DisplayName;
-                stackObj.preserve = originalObj.preserve;
-                stackObj.preservedParentSheetIndex = originalObj.preservedParentSheetIndex;
-                stackObj.honeyType = originalObj.honeyType;
-            }
-
             return stack;
         }
     }

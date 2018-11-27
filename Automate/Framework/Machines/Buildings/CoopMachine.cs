@@ -4,6 +4,8 @@ using StardewValley;
 using StardewValley.Buildings;
 using Microsoft.Xna.Framework;
 using SObject = StardewValley.Object;
+using SGame = StardewValley.Game1;
+using StardewValley.Network;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 {
@@ -42,8 +44,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 
         public ITrackedStack GetOutput()
         {
-            SerializableDictionary<Vector2, SObject> floorItems = this.Coop.indoors.objects;
-            System.Action<Item> emptyAction = _ => floorItems.Remove(this.NextOutputProduct.Key);
+            void emptyAction(Item _) => this.Coop.indoors.Value.removeObject(this.NextOutputProduct.Key, false);
 
             return new TrackedItem(this.NextOutputProduct.Value, emptyAction);
         }
@@ -55,16 +56,18 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 
         private void ProcessFloorItems()
         {
-            SerializableDictionary<Vector2, SObject> floorItems = this.Coop.indoors.objects;
+            Dictionary<Vector2, SObject> floorItems = this.Coop.indoors.Value.objects.FirstOrDefault();
 
             foreach (var floorItem in floorItems)
             {
                 if (this.Products.Contains(floorItem.Value.DisplayName))
                 {
                     this.NextOutputProduct = floorItem;
-                    break;
+                    return;
                 }
             }
+
+            this.NextOutputProduct = EmptyValue;
         }
     }
 }

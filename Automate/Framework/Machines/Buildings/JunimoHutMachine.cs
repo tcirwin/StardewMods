@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using StardewValley;
 using StardewValley.Buildings;
+using StardewValley.Objects;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 {
@@ -13,6 +14,9 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         *********/
         /// <summary>The underlying Junimo hut.</summary>
         private readonly JunimoHut Hut;
+
+        /// <summary>The Junimo hut's output chest.</summary>
+        private Chest Output => this.Hut.output.Value;
 
 
         /*********
@@ -28,7 +32,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         /// <summary>Get the machine's processing state.</summary>
         public MachineState GetState()
         {
-            if (this.Hut.output.items.Any())
+            if (this.Output.items.Any(item => item != null))
                 return MachineState.Done;
             return MachineState.Processing;
         }
@@ -36,8 +40,8 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         /// <summary>Get the machine output.</summary>
         public ITrackedStack GetOutput()
         {
-            List<Item> inventory = this.Hut.output.items;
-            return new TrackedItem(inventory.FirstOrDefault(), onEmpty: item => inventory.Remove(item));
+            IList<Item> inventory = this.Output.items;
+            return new TrackedItem(inventory.FirstOrDefault(item => item != null), onEmpty: this.OnOutputTaken);
         }
 
         /// <summary>Provide input to the machine.</summary>
@@ -46,6 +50,18 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         public bool SetInput(IStorage input)
         {
             return false; // no input
+        }
+
+
+        /*********
+        ** Private methods
+        *********/
+        /// <summary>Remove an output item once it's been taken.</summary>
+        /// <param name="item">The removed item.</param>
+        private void OnOutputTaken(Item item)
+        {
+            this.Output.clearNulls();
+            this.Output.items.Remove(item);
         }
     }
 }
