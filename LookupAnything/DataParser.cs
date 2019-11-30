@@ -8,6 +8,7 @@ using Pathoschild.Stardew.LookupAnything.Framework.Data;
 using Pathoschild.Stardew.LookupAnything.Framework.Models;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Buildings;
 using StardewValley.Characters;
 using StardewValley.Objects;
 using SFarmer = StardewValley.Farmer;
@@ -19,7 +20,7 @@ namespace Pathoschild.Stardew.LookupAnything
     internal class DataParser
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>Provides utility methods for interacting with the game code.</summary>
         private readonly GameHelper GameHelper;
@@ -87,7 +88,7 @@ namespace Pathoschild.Stardew.LookupAnything
         /// <param name="pet">The pet.</param>
         public FriendshipModel GetFriendshipForPet(SFarmer player, Pet pet)
         {
-            return new FriendshipModel(pet.friendshipTowardFarmer, Pet.maxFriendship / 10, Pet.maxFriendship);
+            return new FriendshipModel(pet.friendshipTowardFarmer.Value, Pet.maxFriendship / 10, Pet.maxFriendship);
         }
 
         /// <summary>Get parsed data about the friendship between a player and NPC.</summary>
@@ -102,10 +103,10 @@ namespace Pathoschild.Stardew.LookupAnything
         /// <summary>Get the raw gift tastes from the underlying data.</summary>
         /// <param name="objects">The game's object data.</param>
         /// <remarks>Reverse engineered from <c>Data\NPCGiftTastes</c> and <see cref="StardewValley.NPC.getGiftTasteForThisItem"/>.</remarks>
-        public IEnumerable<GiftTasteModel> GetGiftTastes(ObjectModel[] objects)
+        public IEnumerable<GiftTasteEntry> GetGiftTastes(ObjectModel[] objects)
         {
             // extract raw values
-            var tastes = new List<GiftTasteModel>();
+            var tastes = new List<GiftTasteEntry>();
             {
                 // define data schema
                 var universal = new Dictionary<string, GiftTaste>
@@ -137,7 +138,7 @@ namespace Pathoschild.Stardew.LookupAnything
                         GiftTaste taste = universal[villager];
                         tastes.AddRange(
                             from refID in tasteStr.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                            select new GiftTasteModel(taste, "*", int.Parse(refID), isUniversal: true)
+                            select new GiftTasteEntry(taste, "*", int.Parse(refID), isUniversal: true)
                         );
                     }
                     else
@@ -148,14 +149,14 @@ namespace Pathoschild.Stardew.LookupAnything
                             tastes.AddRange(
                                 from refID in
                                     personalData[taste.Key].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                                select new GiftTasteModel(taste.Value, villager, int.Parse(refID))
+                                select new GiftTasteEntry(taste.Value, villager, int.Parse(refID))
                             );
                         }
                     }
                 }
             }
 
-            // get sanitised data
+            // get sanitized data
             HashSet<int> validItemIDs = new HashSet<int>(objects.Select(p => p.ParentSpriteIndex));
             HashSet<int> validCategories = new HashSet<int>(objects.Where(p => p.Category != 0).Select(p => p.Category));
             return tastes
@@ -222,12 +223,12 @@ namespace Pathoschild.Stardew.LookupAnything
                         itemID = SObject.stone;
 
                     // add drop
-                    drops.Add(new ItemDropData(itemID, maxDrops, chance));
+                    drops.Add(new ItemDropData(itemID, 1, maxDrops, chance));
                 }
                 if (isMineMonster && Game1.player.timesReachedMineBottom >= 1)
                 {
-                    drops.Add(new ItemDropData(SObject.diamondIndex, 1, 0.008f));
-                    drops.Add(new ItemDropData(SObject.prismaticShardIndex, 1, 0.008f));
+                    drops.Add(new ItemDropData(SObject.diamondIndex, 1, 1, 0.008f));
+                    drops.Add(new ItemDropData(SObject.prismaticShardIndex, 1, 1, 0.008f));
                 }
 
                 // yield data
@@ -309,37 +310,64 @@ namespace Pathoschild.Stardew.LookupAnything
         /// <summary>Get the recipe ingredients.</summary>
         /// <param name="metadata">Provides metadata that's not available from the game data directly.</param>
         /// <param name="reflectionHelper">Simplifies access to private game code.</param>
-        /// <param name="translations">Provides translations stored in the mod folder.</param>
-        public RecipeModel[] GetRecipes(Metadata metadata, IReflectionHelper reflectionHelper, ITranslationHelper translations)
+        /// <param name="monitor">The monitor with which to log errors.</param>
+        public RecipeModel[] GetRecipes(Metadata metadata, IReflectionHelper reflectionHelper, IMonitor monitor)
         {
             List<RecipeModel> recipes = new List<RecipeModel>();
 
-            // cooking recipes
-            recipes.AddRange(
-                from entry in CraftingRecipe.cookingRecipes
-                let recipe = new CraftingRecipe(entry.Key, isCookingRecipe: true)
-                select new RecipeModel(recipe, reflectionHelper, translations)
-            );
-
-            // crafting recipes
-            recipes.AddRange(
-                from entry in CraftingRecipe.craftingRecipes
-                let recipe = new CraftingRecipe(entry.Key, isCookingRecipe: false)
-                select new RecipeModel(recipe, reflectionHelper, translations)
-            );
+            // cooking/crafting recipes
+            var craftingRecipes =
+                (from pair in CraftingRecipe.cookingRecipes select new { pair.Key, pair.Value, IsCookingRecipe = true })
+                .Concat(from pair in CraftingRecipe.craftingRecipes select new { pair.Key, pair.Value, IsCookingRecipe = false });
+            foreach (var entry in craftingRecipes)
+            {
+                try
+                {
+                    var recipe = new CraftingRecipe(entry.Key, entry.IsCookingRecipe);
+                    recipes.Add(new RecipeModel(recipe, reflectionHelper));
+                }
+                catch (Exception ex)
+                {
+                    monitor.Log($"Couldn't parse {(entry.IsCookingRecipe ? "cooking" : "crafting")} recipe '{entry.Key}' due to an invalid format.\nRecipe data: '{entry.Value}'\nError: {ex}", LogLevel.Warn);
+                }
+            }
 
             // machine recipes
             recipes.AddRange(
                 from entry in metadata.MachineRecipes
                 let machine = new SObject(Vector2.Zero, entry.MachineID)
-                select new RecipeModel(null, machine.DisplayName, entry.Ingredients, ingredient => this.CreateRecipeItem(ingredient.ParentSheetIndex, entry.Output), false, entry.ExceptIngredients)
+                select new RecipeModel(
+                    key: null,
+                    type: RecipeType.MachineInput,
+                    displayType: machine.DisplayName,
+                    ingredients: entry.Ingredients.Select(p => new RecipeIngredientModel(p)),
+                    item: ingredient => this.CreateRecipeItem(ingredient?.ParentSheetIndex, entry.Output),
+                    mustBeLearned: false,
+                    exceptIngredients: entry.ExceptIngredients?.Select(p => new RecipeIngredientModel(p)),
+                    outputItemIndex: entry.Output,
+                    minOutput: entry.MinOutput,
+                    maxOutput: entry.MaxOutput,
+                    outputChance: entry.OutputChance,
+                    isForMachine: p => p is SObject obj && obj.ParentSheetIndex == entry.MachineID
+                )
             );
 
             // building recipes
             recipes.AddRange(
                 from entry in metadata.BuildingRecipes
                 let building = new BluePrint(entry.BuildingKey)
-                select new RecipeModel(null, building.displayName, entry.Ingredients, ingredient => this.CreateRecipeItem(ingredient.ParentSheetIndex, entry.Output), false, entry.ExceptIngredients)
+                select new RecipeModel(
+                    key: null,
+                    type: RecipeType.BuildingBlueprint,
+                    displayType: building.displayName,
+                    ingredients: entry.Ingredients.Select(p => new RecipeIngredientModel(p.Key, p.Value)),
+                    item: ingredient => this.CreateRecipeItem(ingredient?.ParentSheetIndex, entry.Output),
+                    mustBeLearned: false,
+                    outputItemIndex: entry.Output,
+                    minOutput: entry.OutputCount ?? 1,
+                    exceptIngredients: entry.ExceptIngredients?.Select(p => new RecipeIngredientModel(p, 1)),
+                    isForMachine: p => p is Building target && target.buildingType.Value == entry.BuildingKey
+                )
             );
 
             return recipes.ToArray();
@@ -351,27 +379,30 @@ namespace Pathoschild.Stardew.LookupAnything
         /// <summary>Create a custom recipe output.</summary>
         /// <param name="inputID">The input ingredient ID.</param>
         /// <param name="outputID">The output item ID.</param>
-        private SObject CreateRecipeItem(int inputID, int outputID)
+        private SObject CreateRecipeItem(int? inputID, int outputID)
         {
             SObject item = this.GameHelper.GetObjectBySpriteIndex(outputID);
-            switch (outputID)
+            if (inputID != null)
             {
-                case 342:
-                    item.preserve.Value = SObject.PreserveType.Pickle;
-                    item.preservedParentSheetIndex.Value = inputID;
-                    break;
-                case 344:
-                    item.preserve.Value = SObject.PreserveType.Jelly;
-                    item.preservedParentSheetIndex.Value = inputID;
-                    break;
-                case 348:
-                    item.preserve.Value = SObject.PreserveType.Wine;
-                    item.preservedParentSheetIndex.Value = inputID;
-                    break;
-                case 350:
-                    item.preserve.Value = SObject.PreserveType.Juice;
-                    item.preservedParentSheetIndex.Value = inputID;
-                    break;
+                switch (outputID)
+                {
+                    case 342:
+                        item.preserve.Value = SObject.PreserveType.Pickle;
+                        item.preservedParentSheetIndex.Value = inputID.Value;
+                        break;
+                    case 344:
+                        item.preserve.Value = SObject.PreserveType.Jelly;
+                        item.preservedParentSheetIndex.Value = inputID.Value;
+                        break;
+                    case 348:
+                        item.preserve.Value = SObject.PreserveType.Wine;
+                        item.preservedParentSheetIndex.Value = inputID.Value;
+                        break;
+                    case 350:
+                        item.preserve.Value = SObject.PreserveType.Juice;
+                        item.preservedParentSheetIndex.Value = inputID.Value;
+                        break;
+                }
             }
             return item;
         }

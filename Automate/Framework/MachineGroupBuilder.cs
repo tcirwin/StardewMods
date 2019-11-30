@@ -10,7 +10,7 @@ namespace Pathoschild.Stardew.Automate.Framework
     internal class MachineGroupBuilder
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The location containing the group.</summary>
         private readonly GameLocation Location;
@@ -23,6 +23,13 @@ namespace Pathoschild.Stardew.Automate.Framework
 
         /// <summary>The tiles comprising the group.</summary>
         private readonly HashSet<Vector2> Tiles = new HashSet<Vector2>();
+
+
+        /*********
+        ** Accessors
+        *********/
+        /// <summary>The tile areas added to the machine group since the queue was last cleared.</summary>
+        internal IList<Rectangle> NewTileAreas { get; } = new List<Rectangle>();
 
 
         /*********
@@ -40,6 +47,7 @@ namespace Pathoschild.Stardew.Automate.Framework
         public void Add(IMachine machine)
         {
             this.Machines.Add(machine);
+            this.Add(machine.TileArea);
         }
 
         /// <summary>Add a container to the group.</summary>
@@ -47,14 +55,16 @@ namespace Pathoschild.Stardew.Automate.Framework
         public void Add(IContainer container)
         {
             this.Containers.Add(container);
+            this.Add(container.TileArea);
         }
 
-        /// <summary>Add tiles to the group.</summary>
-        /// <param name="tileArea">The tile area occupied by the container.</param>
+        /// <summary>Add connector tiles to the group.</summary>
+        /// <param name="tileArea">The tile area to add.</param>
         public void Add(Rectangle tileArea)
         {
             foreach (Vector2 tile in tileArea.GetTiles())
                 this.Tiles.Add(tile);
+            this.NewTileAreas.Add(tileArea);
         }
 
         /// <summary>Get whether any tiles were added to the builder.</summary>

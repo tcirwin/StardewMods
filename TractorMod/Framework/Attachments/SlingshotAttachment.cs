@@ -4,7 +4,6 @@ using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
-using SFarmer = StardewValley.Farmer;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
@@ -13,13 +12,10 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class SlingshotAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The attachment settings.</summary>
-        private readonly SlingshotConfig Config;
-
-        /// <summary>Simplifies access to private game code.</summary>
-        private readonly IReflectionHelper Reflection;
+        private readonly GenericAttachmentConfig Config;
 
 
         /*********
@@ -28,11 +24,10 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The attachment settings.</param>
         /// <param name="reflection">Simplifies access to private game code.</param>
-        public SlingshotAttachment(SlingshotConfig config, IReflectionHelper reflection)
-            : base(rateLimit: 60)
+        public SlingshotAttachment(GenericAttachmentConfig config, IReflectionHelper reflection)
+            : base(reflection, rateLimit: 60)
         {
             this.Config = config;
-            this.Reflection = reflection;
         }
 
         /// <summary>Get whether the tool is currently enabled.</summary>
@@ -40,7 +35,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool IsEnabled(SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool IsEnabled(Farmer player, Tool tool, Item item, GameLocation location)
         {
             return tool is Slingshot && this.Config.Enable;
         }
@@ -53,10 +48,10 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, Farmer player, Tool tool, Item item, GameLocation location)
         {
             this.Reflection.GetField<bool>(tool, "canPlaySound").SetValue(false);
-            return this.UseToolOnTile(tool, tile);
+            return this.UseToolOnTile(tool, tile, player, location);
         }
     }
 }

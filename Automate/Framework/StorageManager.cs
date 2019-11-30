@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Pathoschild.Stardew.Automate.Framework.Storage;
 using StardewValley;
 using SObject = StardewValley.Object;
 
@@ -10,7 +11,7 @@ namespace Pathoschild.Stardew.Automate.Framework
     internal class StorageManager : IStorage
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The storage containers.</summary>
         private readonly IContainer[] Containers;
@@ -34,6 +35,9 @@ namespace Pathoschild.Stardew.Automate.Framework
         {
             foreach (IContainer container in this.Containers)
             {
+                if (!container.AllowsOutput())
+                    continue;
+
                 foreach (ITrackedStack item in container)
                     yield return item;
             }
@@ -49,20 +53,19 @@ namespace Pathoschild.Stardew.Automate.Framework
         /// <returns>Returns whether the requirement is met.</returns>
         public bool TryGetIngredient(Func<ITrackedStack, bool> predicate, int count, out IConsumable consumable)
         {
-            int countMissing = count;
-            ITrackedStack[] consumables = this.GetItems().Where(predicate)
-                .TakeWhile(chestItem =>
+            StackAccumulator stacks = new StackAccumulator();
+            foreach (ITrackedStack input in this.GetItems().Where(predicate))
+            {
+                TrackedItemCollection stack = stacks.Add(input);
+                if (stack.Count >= count)
                 {
-                    if (countMissing <= 0)
-                        return false;
+                    consumable = new Consumable(stack, count);
+                    return consumable.IsMet;
+                }
+            }
 
-                    countMissing -= chestItem.Count;
-                    return true;
-                })
-                .ToArray();
-
-            consumable = new Consumable(new TrackedItemCollection(consumables), count);
-            return consumable.IsMet;
+            consumable = null;
+            return false;
         }
 
         /// <summary>Get an ingredient needed for a recipe.</summary>
@@ -80,23 +83,23 @@ namespace Pathoschild.Stardew.Automate.Framework
         /// <param name="consumable">The matching consumables.</param>
         /// <param name="recipe">The matched requisition.</param>
         /// <returns>Returns whether the requirement is met.</returns>
-        public bool TryGetIngredient(Recipe[] recipes, out IConsumable consumable, out Recipe recipe)
+        public bool TryGetIngredient(IRecipe[] recipes, out IConsumable consumable, out IRecipe recipe)
         {
-            IDictionary<Recipe, List<ITrackedStack>> accumulator = recipes.ToDictionary(req => req, req => new List<ITrackedStack>());
+            IDictionary<IRecipe, StackAccumulator> accumulator = recipes.ToDictionary(req => req, req => new StackAccumulator());
 
-            foreach (ITrackedStack stack in this.GetItems())
+            foreach (ITrackedStack input in this.GetItems())
             {
                 foreach (var entry in accumulator)
                 {
                     recipe = entry.Key;
-                    List<ITrackedStack> found = entry.Value;
+                    StackAccumulator stacks = entry.Value;
 
-                    if (recipe.AcceptsInput(stack))
+                    if (recipe.AcceptsInput(input))
                     {
-                        found.Add(stack);
-                        if (found.Sum(p => p.Count) >= recipe.InputCount)
+                        ITrackedStack stack = stacks.Add(input);
+                        if (stack.Count >= recipe.InputCount)
                         {
-                            consumable = new Consumable(new TrackedItemCollection(found), entry.Key.InputCount);
+                            consumable = new Consumable(stack, entry.Key.InputCount);
                             return true;
                         }
                     }
@@ -146,12 +149,12 @@ namespace Pathoschild.Stardew.Automate.Framework
 
             int originalCount = item.Count;
 
-            // push into 'output' chests
-            foreach (IContainer container in this.Containers)
-            {
-                if (container.Name.IndexOf("|automate:output|", StringComparison.InvariantCultureIgnoreCase) < 0)
-                    continue;
+            var preferOutputContainers = this.Containers.Where(p => p.AllowsInput() && p.PreferForOutput());
+            var otherContainers = this.Containers.Where(p => p.AllowsInput() && !p.PreferForOutput());
 
+            // push into 'output' chests
+            foreach (IContainer container in preferOutputContainers)
+            {
                 container.Store(item);
                 if (item.Count <= 0)
                     return true;
@@ -159,7 +162,7 @@ namespace Pathoschild.Stardew.Automate.Framework
 
             // push into chests that already have this item
             string itemKey = this.GetItemKey(item.Sample);
-            foreach (IContainer container in this.Containers)
+            foreach (IContainer container in otherContainers)
             {
                 if (container.All(p => this.GetItemKey(p.Sample) != itemKey))
                     continue;
@@ -172,7 +175,7 @@ namespace Pathoschild.Stardew.Automate.Framework
             // push into first available chest
             if (item.Count >= 0)
             {
-                foreach (IContainer container in this.Containers)
+                foreach (IContainer container in otherContainers)
                 {
                     container.Store(item);
                     if (item.Count <= 0)

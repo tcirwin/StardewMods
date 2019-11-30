@@ -1,17 +1,20 @@
+using System;
 using Microsoft.Xna.Framework;
+using StardewValley;
+using StardewValley.Objects;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A preserves jar that accepts input and provides output.</summary>
     /// <remarks>See the game's machine logic in <see cref="SObject.performObjectDropInAction"/> and <see cref="SObject.checkForAction"/>.</remarks>
-    internal class PreservesJarMachine : GenericMachine
+    internal class PreservesJarMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes =
+        private readonly IRecipe[] Recipes =
         {
             // fruit => jelly
             new Recipe(
@@ -48,6 +51,33 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 
                 },
                 minutes: 4000
+            ),
+
+            // roe => aged roe || sturgeon roe => caviar
+            new Recipe(
+                input: 812, // Roe
+                inputCount: 1,
+                output: input =>
+                {
+                    if (!(input is SObject inputObj))
+                        throw new InvalidOperationException($"Unexpected recipe input: expected {typeof(SObject).FullName} instance.");
+
+                    // sturgeon roe => caviar
+                    if (inputObj.preservedParentSheetIndex.Value == 698)
+                        return new SObject(445, 1);
+
+                    // roe => aged roe
+                    var result = (input is ColoredObject coloredInput) ? new ColoredObject(447, 1, coloredInput.color.Value) : new SObject(447, 1);
+                    result.name = $"Aged {input.Name}";
+                    result.preserve.Value = SObject.PreserveType.AgedRoe;
+                    result.preservedParentSheetIndex.Value = inputObj.preservedParentSheetIndex.Value;
+                    result.Category = -26;
+                    result.Price = inputObj.Price * 2;
+                    return result;
+                },
+                minutes: input => input is SObject obj && obj.preservedParentSheetIndex.Value == 698
+                    ? 6000 // caviar
+                    : 4000 // aged roe
             )
         };
 
@@ -57,8 +87,10 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public PreservesJarMachine(SObject machine)
-            : base(machine) { }
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public PreservesJarMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile) { }
 
         /// <summary>Provide input to the machine.</summary>
         /// <param name="input">The available items.</param>

@@ -7,7 +7,7 @@ using Pathoschild.Stardew.DataLayers.Framework;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
-using Object = StardewValley.Object;
+using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
 {
@@ -15,13 +15,13 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
     internal class SprinklerLayer : BaseLayer
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
-        /// <summary>The color for sprinkled tiles.</summary>
-        private readonly Color WetColor = Color.Green;
+        /// <summary>The legend entry for sprinkled tiles.</summary>
+        private readonly LegendEntry Wet;
 
-        /// <summary>The color for unsprinkled tiles.</summary>
-        private readonly Color DryColor = Color.Red;
+        /// <summary>The legend entry for unsprinkled tiles.</summary>
+        private readonly LegendEntry Dry;
 
         /// <summary>The border color for the sprinkler under the cursor.</summary>
         private readonly Color SelectedColor = Color.Blue;
@@ -50,8 +50,8 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
             this.Mods = mods;
             this.Legend = new[]
             {
-                new LegendEntry(translations.Get("sprinklers.covered"), this.WetColor),
-                new LegendEntry(translations.Get("sprinklers.dry-crops"), this.DryColor)
+                this.Wet = new LegendEntry(translations, "sprinklers.covered", Color.Green),
+                this.Dry = new LegendEntry(translations, "sprinklers.dry-crops", Color.Red)
             };
 
             // get static sprinkler coverage
@@ -61,6 +61,8 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
             this.MaxRadius = this.StaticTilesBySprinklerID.Max(p => this.GetMaxRadius(p.Value));
             if (mods.BetterSprinklers.IsLoaded)
                 this.MaxRadius = Math.Max(this.MaxRadius, mods.BetterSprinklers.MaxRadius);
+            if (mods.LineSprinklers.IsLoaded)
+                this.MaxRadius = Math.Max(this.MaxRadius, mods.LineSprinklers.MaxRadius);
         }
 
         /// <summary>Get the updated data layer tiles.</summary>
@@ -71,41 +73,41 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
         {
             Vector2[] visibleTiles = visibleArea.GetTiles().ToArray();
 
+            // get coverage
+            IDictionary<int, Vector2[]> coverageBySprinklerID = this.GetCurrentSprinklerTiles(this.StaticTilesBySprinklerID);
+
             // get sprinklers
             Vector2[] searchTiles = visibleArea.Expand(this.MaxRadius).GetTiles().ToArray();
-            Object[] sprinklers =
+            SObject[] sprinklers =
                 (
                     from Vector2 tile in searchTiles
                     where location.objects.ContainsKey(tile)
                     let sprinkler = location.objects[tile]
-                    where this.IsSprinkler(sprinkler)
+                    where coverageBySprinklerID.ContainsKey(sprinkler.ParentSheetIndex)
                     select sprinkler
                 )
                 .ToArray();
 
-            // get radius
-            IDictionary<int, Vector2[]> coverageBySprinklerID = this.GetCurrentSprinklerTiles(this.StaticTilesBySprinklerID);
-
             // yield sprinkler coverage
             HashSet<Vector2> covered = new HashSet<Vector2>();
-            foreach (Object sprinkler in sprinklers)
+            foreach (SObject sprinkler in sprinklers)
             {
-                TileData[] tiles = this.GetCoverage(sprinkler, sprinkler.TileLocation, coverageBySprinklerID).Select(pos => new TileData(pos, this.WetColor)).ToArray();
+                TileData[] tiles = this.GetCoverage(sprinkler, sprinkler.TileLocation, coverageBySprinklerID).Select(pos => new TileData(pos, this.Wet)).ToArray();
                 foreach (TileData tile in tiles)
                     covered.Add(tile.TilePosition);
-                yield return new TileGroup(tiles, outerBorderColor: sprinkler.TileLocation == cursorTile ? this.SelectedColor : this.WetColor);
+                yield return new TileGroup(tiles, outerBorderColor: sprinkler.TileLocation == cursorTile ? this.SelectedColor : this.Wet.Color);
             }
 
             // yield dry crops
-            TileData[] dryCrops = this.GetDryCrops(location, visibleTiles, covered).Select(pos => new TileData(pos, this.DryColor)).ToArray();
-            yield return new TileGroup(dryCrops, outerBorderColor: this.DryColor);
+            TileData[] dryCrops = this.GetDryCrops(location, visibleTiles, covered).Select(pos => new TileData(pos, this.Dry)).ToArray();
+            yield return new TileGroup(dryCrops, outerBorderColor: this.Dry.Color);
 
             // yield sprinkler being placed
-            Object heldObj = Game1.player.ActiveObject;
-            if (this.IsSprinkler(heldObj))
+            SObject heldObj = Game1.player.ActiveObject;
+            if (heldObj != null && coverageBySprinklerID.ContainsKey(heldObj.ParentSheetIndex))
             {
-                TileData[] tiles = this.GetCoverage(heldObj, cursorTile, coverageBySprinklerID).Select(pos => new TileData(pos, this.WetColor * 0.75f)).ToArray();
-                yield return new TileGroup(tiles, outerBorderColor: this.SelectedColor);
+                TileData[] tiles = this.GetCoverage(heldObj, cursorTile, coverageBySprinklerID).Select(pos => new TileData(pos, this.Wet, this.Wet.Color * 0.75f)).ToArray();
+                yield return new TileGroup(tiles, outerBorderColor: this.SelectedColor, shouldExport: false);
             }
         }
 
@@ -113,13 +115,6 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
         /*********
         ** Private methods
         *********/
-        /// <summary>Get whether a map object is a sprinkler.</summary>
-        /// <param name="obj">The map object.</param>
-        private bool IsSprinkler(Object obj)
-        {
-            return obj != null && this.StaticTilesBySprinklerID.ContainsKey(obj.ParentSheetIndex);
-        }
-
         /// <summary>Get whether a map terrain feature is a crop.</summary>
         /// <param name="terrain">The map terrain feature.</param>
         private bool IsCrop(TerrainFeature terrain)
@@ -127,7 +122,7 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
             return terrain is HoeDirt dirt && dirt.crop != null;
         }
 
-        /// <summary>Get the relative sprinkler tile coverage, including any mod customisations which don't change after launch.</summary>
+        /// <summary>Get the relative sprinkler tile coverage, including any mod customizations which don't change after launch.</summary>
         /// <param name="mods">Handles access to the supported mod integrations.</param>
         private IDictionary<int, Vector2[]> GetStaticSprinklerTiles(ModIntegrations mods)
         {
@@ -182,7 +177,7 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
         private IDictionary<int, Vector2[]> GetCurrentSprinklerTiles(IDictionary<int, Vector2[]> staticTiles)
         {
             // get static tiles
-            if (!this.Mods.BetterSprinklers.IsLoaded)
+            if (!this.Mods.BetterSprinklers.IsLoaded && !this.Mods.LineSprinklers.IsLoaded)
                 return staticTiles;
 
             // merge custom tiles
@@ -190,6 +185,11 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
             if (this.Mods.BetterSprinklers.IsLoaded)
             {
                 foreach (var pair in this.Mods.BetterSprinklers.GetSprinklerTiles())
+                    tilesBySprinklerID[pair.Key] = pair.Value;
+            }
+            if (this.Mods.LineSprinklers.IsLoaded)
+            {
+                foreach (var pair in this.Mods.LineSprinklers.GetSprinklerTiles())
                     tilesBySprinklerID[pair.Key] = pair.Value;
             }
             return tilesBySprinklerID;
@@ -209,8 +209,8 @@ namespace Pathoschild.Stardew.DataLayers.Layers.Coverage
         /// <param name="sprinkler">The sprinkler whose radius to get.</param>
         /// <param name="origin">The sprinkler's tile.</param>
         /// <param name="radii">The sprinkler radii centered on (0, 0) indexed by sprinkler ID.</param>
-        /// <remarks>Derived from <see cref="Object.DayUpdate"/>.</remarks>
-        private IEnumerable<Vector2> GetCoverage(Object sprinkler, Vector2 origin, IDictionary<int, Vector2[]> radii)
+        /// <remarks>Derived from <see cref="SObject.DayUpdate"/>.</remarks>
+        private IEnumerable<Vector2> GetCoverage(SObject sprinkler, Vector2 origin, IDictionary<int, Vector2[]> radii)
         {
             // get relative tiles
             if (!radii.TryGetValue(sprinkler.ParentSheetIndex, out Vector2[] tiles))

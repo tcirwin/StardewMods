@@ -6,7 +6,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
     internal class ContainerData
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>A regular expression which matches a group of tags in the chest name.</summary>
         private const string TagGroupPattern = @"\|([^\|]+)\|";
@@ -16,7 +16,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
         ** Accessors
         *********/
         /// <summary>The default name for the container type, if any.</summary>
-        public string DefaultDisplayName { get; set; }
+        public string DefaultInternalName { get; set; }
 
         /// <summary>The display name.</summary>
         public string Name { get; set; }
@@ -33,6 +33,12 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
         /// <summary>Whether Automate should prefer this container for output.</summary>
         public bool ShouldAutomatePreferForOutput { get; set; }
 
+        /// <summary>Whether Automate should allow getting items from this container.</summary>
+        public bool ShouldAutomateNoInput { get; set; }
+
+        /// <summary>Whether Automate should allow outputting items to this container.</summary>
+        public bool ShouldAutomateNoOutput { get; set; }
+
         /// <summary>The sort value (if any).</summary>
         public int? Order { get; set; }
 
@@ -44,14 +50,14 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
         public ContainerData() { }
 
         /// <summary>Construct an empty instance.</summary>
-        /// <param name="defaultDisplayName">The game's default name for the container, if any.</param>
-        public ContainerData(string defaultDisplayName)
+        /// <param name="defaultInternalName">The game's default name for the container, if any.</param>
+        public ContainerData(string defaultInternalName)
         {
-            this.DefaultDisplayName = defaultDisplayName;
+            this.DefaultInternalName = defaultInternalName;
         }
 
-        /// <summary>Parse a serialised name string.</summary>
-        /// <param name="name">The serialised name string.</param>
+        /// <summary>Parse a serialized name string.</summary>
+        /// <param name="name">The serialized name string.</param>
         /// <param name="defaultDisplayName">The default display name for the container.</param>
         public static ContainerData ParseName(string name, string defaultDisplayName)
         {
@@ -82,6 +88,10 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
                     data.ShouldAutomateIgnore = true;
                 else if (tag.ToLower() == "automate:output")
                     data.ShouldAutomatePreferForOutput = true;
+                else if (tag.ToLower() == "automate:noinput")
+                    data.ShouldAutomateNoInput = true;
+                else if (tag.ToLower() == "automate:nooutput")
+                    data.ShouldAutomateNoOutput = true;
             }
 
             // read display name
@@ -93,10 +103,10 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
             return data;
         }
 
-        /// <summary>Get a serialised name representation of the container data.</summary>
+        /// <summary>Get a serialized name representation of the container data.</summary>
         public string ToName()
         {
-            string internalName = !this.HasDefaultDisplayName() ? this.Name : this.DefaultDisplayName;
+            string internalName = !this.HasDefaultDisplayName() ? this.Name : this.DefaultInternalName;
             if (this.Order.HasValue && this.Order != 0)
                 internalName += $" |{this.Order}|";
             if (this.IsIgnored)
@@ -107,6 +117,10 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
                 internalName += " |automate:ignore|";
             if (this.ShouldAutomatePreferForOutput)
                 internalName += " |automate:output|";
+            if (this.ShouldAutomateNoInput)
+                internalName += " |automate:noinput|";
+            if (this.ShouldAutomateNoOutput)
+                internalName += " |automate:nooutput|";
 
             return internalName;
         }
@@ -114,7 +128,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
         /// <summary>Whether the container has the default display name.</summary>
         public bool HasDefaultDisplayName()
         {
-            return string.IsNullOrWhiteSpace(this.Name) || this.Name == this.DefaultDisplayName;
+            return string.IsNullOrWhiteSpace(this.Name) || this.Name == this.DefaultInternalName;
         }
 
         /// <summary>Get whether the container has any non-default data.</summary>
@@ -126,7 +140,22 @@ namespace Pathoschild.Stardew.ChestsAnywhere.Framework
                 || this.IsIgnored
                 || !string.IsNullOrWhiteSpace(this.Category)
                 || this.ShouldAutomateIgnore
-                || this.ShouldAutomateIgnore;
+                || this.ShouldAutomatePreferForOutput
+                || this.ShouldAutomateNoInput
+                || this.ShouldAutomateNoOutput;
+        }
+
+        /// <summary>Reset all container data to the default.</summary>
+        public void Reset()
+        {
+            this.Name = this.DefaultInternalName;
+            this.Order = null;
+            this.IsIgnored = false;
+            this.Category = null;
+            this.ShouldAutomateIgnore = false;
+            this.ShouldAutomatePreferForOutput = false;
+            this.ShouldAutomateNoInput = false;
+            this.ShouldAutomateNoOutput = false;
         }
     }
 }

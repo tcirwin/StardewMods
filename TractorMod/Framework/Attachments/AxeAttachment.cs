@@ -1,10 +1,11 @@
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Pathoschild.Stardew.TractorMod.Framework.Config;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
-using SFarmer = StardewValley.Farmer;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
@@ -13,7 +14,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class AxeAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The attachment settings.</summary>
         private readonly AxeConfig Config;
@@ -32,7 +33,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The attachment settings.</param>
-        public AxeAttachment(AxeConfig config)
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public AxeAttachment(AxeConfig config, IReflectionHelper reflection)
+            : base(reflection)
         {
             this.Config = config;
         }
@@ -42,7 +45,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool IsEnabled(SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool IsEnabled(Farmer player, Tool tool, Item item, GameLocation location)
         {
             return tool is Axe;
         }
@@ -55,47 +58,112 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, Farmer player, Tool tool, Item item, GameLocation location)
         {
-            // clear twigs & weeds
-            if (this.Config.ClearDebris && (tileObj?.Name == "Twig" || this.IsWeed(tileObj)))
-                return this.UseToolOnTile(tool, tile);
+            // clear debris
+            if (this.Config.ClearDebris && (this.IsTwig(tileObj) || this.IsWeed(tileObj)))
+                return this.UseToolOnTile(tool, tile, player, location);
 
-            // check terrain feature
+            // cut terrain features
             switch (tileFeature)
             {
                 // cut non-fruit tree
                 case Tree tree:
-                    if (tree.tapped.Value ? this.Config.CutTappedTrees : this.Config.CutTrees)
-                        return this.UseToolOnTile(tool, tile);
-                    break;
+                    return this.ShouldCut(tree) && this.UseToolOnTile(tool, tile, player, location);
 
                 // cut fruit tree
-                case FruitTree _:
-                    if (this.Config.CutFruitTrees)
-                        return this.UseToolOnTile(tool, tile);
-                    break;
+                case FruitTree tree:
+                    return this.ShouldCut(tree) && this.UseToolOnTile(tool, tile, player, location);
+
+                // cut bushes
+                case Bush bush:
+                    return this.ShouldCut(bush) && this.UseToolOnTile(tool, tile, player, location);
 
                 // clear crops
                 case HoeDirt dirt when dirt.crop != null:
                     if (this.Config.ClearDeadCrops && dirt.crop.dead.Value)
-                        return this.UseToolOnTile(tool, tile);
+                        return this.UseToolOnTile(tool, tile, player, location);
                     if (this.Config.ClearLiveCrops && !dirt.crop.dead.Value)
-                        return this.UseToolOnTile(tool, tile);
+                        return this.UseToolOnTile(tool, tile, player, location);
                     break;
             }
 
-            // clear stumps
-            // This needs to check if the axe upgrade level is high enough first, to avoid spamming
-            // 'need to upgrade your tool' messages. Based on ResourceClump.performToolAction.
-            if (this.Config.ClearDebris)
+            // cut resource stumps
+            if (this.Config.ClearDebris || this.Config.CutGiantCrops)
             {
                 ResourceClump clump = this.GetResourceClumpCoveringTile(location, tile);
-                if (clump != null && this.ResourceUpgradeLevelsNeeded.ContainsKey(clump.parentSheetIndex.Value) && tool.UpgradeLevel >= this.ResourceUpgradeLevelsNeeded[clump.parentSheetIndex.Value])
-                    this.UseToolOnTile(tool, tile);
+
+                // giant crops
+                if (this.Config.CutGiantCrops && clump is GiantCrop)
+                    this.UseToolOnTile(tool, tile, player, location);
+
+                // big stumps and fallen logs
+                // This needs to check if the axe upgrade level is high enough first, to avoid spamming
+                // 'need to upgrade your tool' messages. Based on ResourceClump.performToolAction.
+                if (this.Config.ClearDebris && clump != null && this.ResourceUpgradeLevelsNeeded.ContainsKey(clump.parentSheetIndex.Value) && tool.UpgradeLevel >= this.ResourceUpgradeLevelsNeeded[clump.parentSheetIndex.Value])
+                    this.UseToolOnTile(tool, tile, player, location);
+            }
+
+            // cut bushes in large terrain features
+            if (this.Config.CutBushes)
+            {
+                foreach (Bush bush in location.largeTerrainFeatures.OfType<Bush>().Where(p => p.tilePosition.Value == tile))
+                {
+                    if (this.ShouldCut(bush) && this.UseToolOnTile(tool, tile, player, location))
+                        return true;
+                }
             }
 
             return false;
+        }
+
+
+        /*********
+        ** Private methods
+        *********/
+        /// <summary>Get whether a given tree should be chopped.</summary>
+        /// <param name="tree">The tree to check.</param>
+        private bool ShouldCut(Tree tree)
+        {
+            var config = this.Config;
+
+            // seed
+            if (tree.growthStage.Value == Tree.seedStage)
+                return config.ClearTreeSeeds;
+
+            // sapling
+            if (tree.growthStage.Value < Tree.treeStage)
+                return config.ClearTreeSaplings;
+
+            // full-grown
+            return tree.tapped.Value ? config.CutTappedTrees : config.CutGrownTrees;
+        }
+
+        /// <summary>Get whether a given tree should be chopped.</summary>
+        /// <param name="tree">The tree to check.</param>
+        private bool ShouldCut(FruitTree tree)
+        {
+            var config = this.Config;
+
+            // seed
+            if (tree.growthStage.Value == Tree.seedStage)
+                return config.ClearFruitTreeSeeds;
+
+            // sapling
+            if (tree.growthStage.Value < Tree.treeStage)
+                return config.ClearFruitTreeSaplings;
+
+            // full-grown
+            return config.CutGrownFruitTrees;
+        }
+
+        /// <summary>Get whether a given bush should be chopped.</summary>
+        /// <param name="bush">The bush to check.</param>
+        private bool ShouldCut(Bush bush)
+        {
+            var config = this.Config;
+
+            return config.CutBushes;
         }
     }
 }

@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
-using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.ConfigModels;
-using ContentPatcher.Framework.Tokens;
+using ContentPatcher.Framework.Lexing.LexTokens;
+using ContentPatcher.Framework.Tokens.Json;
 using StardewModdingAPI;
 
 namespace ContentPatcher.Framework.Migrations
@@ -11,7 +11,7 @@ namespace ContentPatcher.Framework.Migrations
     internal class AggregateMigration : IMigration
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The valid format versions.</summary>
         private readonly HashSet<string> ValidVersions;
@@ -66,16 +66,16 @@ namespace ContentPatcher.Framework.Migrations
             return true;
         }
 
-        /// <summary>Migrate a token name.</summary>
-        /// <param name="name">The token name to migrate.</param>
+        /// <summary>Migrate a lexical token.</summary>
+        /// <param name="lexToken">The lexical token to migrate.</param>
         /// <param name="error">An error message which indicates why migration failed (if any).</param>
         /// <returns>Returns whether migration succeeded.</returns>
-        public bool TryMigrate(ref TokenName name, out string error)
+        public bool TryMigrate(ref ILexToken lexToken, out string error)
         {
             // apply migrations
             foreach (IMigration migration in this.Migrations)
             {
-                if (!migration.TryMigrate(ref name, out error))
+                if (!migration.TryMigrate(ref lexToken, out error))
                     return false;
             }
 
@@ -84,16 +84,34 @@ namespace ContentPatcher.Framework.Migrations
             return true;
         }
 
-        /// <summary>Migrate a tokenised string.</summary>
-        /// <param name="tokenStr">The tokenised string to migrate.</param>
+        /// <summary>Migrate a tokenized string.</summary>
+        /// <param name="tokenStr">The tokenized string to migrate.</param>
         /// <param name="error">An error message which indicates why migration failed (if any).</param>
         /// <returns>Returns whether migration succeeded.</returns>
-        public bool TryMigrate(ref TokenString tokenStr, out string error)
+        public bool TryMigrate(IParsedTokenString tokenStr, out string error)
         {
             // apply migrations
             foreach (IMigration migration in this.Migrations)
             {
-                if (!migration.TryMigrate(ref tokenStr, out error))
+                if (!migration.TryMigrate(tokenStr, out error))
+                    return false;
+            }
+
+            // no issues found
+            error = null;
+            return true;
+        }
+
+        /// <summary>Migrate a tokenized JSON structure.</summary>
+        /// <param name="tokenStructure">The tokenized JSON structure to migrate.</param>
+        /// <param name="error">An error message which indicates why migration failed (if any).</param>
+        /// <returns>Returns whether migration succeeded.</returns>
+        public bool TryMigrate(TokenizableJToken tokenStructure, out string error)
+        {
+            // apply migrations
+            foreach (IMigration migration in this.Migrations)
+            {
+                if (!migration.TryMigrate(tokenStructure, out error))
                     return false;
             }
 

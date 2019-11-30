@@ -1,8 +1,9 @@
 using Microsoft.Xna.Framework;
 using Pathoschild.Stardew.Common.Utilities;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
-using SFarmer = StardewValley.Farmer;
+using StardewValley.Tools;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
@@ -11,7 +12,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class CustomAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The enabled custom tool or item names.</summary>
         private readonly InvariantHashSet CustomNames;
@@ -22,7 +23,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="customAttachments">The enabled custom tool or item names.</param>
-        public CustomAttachment(string[] customAttachments)
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public CustomAttachment(string[] customAttachments, IReflectionHelper reflection)
+            : base(reflection)
         {
             this.CustomNames = new InvariantHashSet(customAttachments);
         }
@@ -32,7 +35,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool IsEnabled(SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool IsEnabled(Farmer player, Tool tool, Item item, GameLocation location)
         {
             return
                 (tool != null && this.CustomNames.Contains(tool.Name))
@@ -47,11 +50,15 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, SFarmer player, Tool tool, Item item, GameLocation location)
+        public override bool Apply(Vector2 tile, SObject tileObj, TerrainFeature tileFeature, Farmer player, Tool tool, Item item, GameLocation location)
         {
+            // apply melee weapon
+            if (tool is MeleeWeapon weapon)
+                return this.UseWeaponOnTile(weapon, tile, player, location);
+
             // apply tool
             if (tool != null && this.CustomNames.Contains(tool.Name))
-                return this.UseToolOnTile(tool, tile);
+                return this.UseToolOnTile(tool, tile, player, location);
 
             // apply item
             if (item != null && item.Stack > 0 && this.CustomNames.Contains(item.Name))

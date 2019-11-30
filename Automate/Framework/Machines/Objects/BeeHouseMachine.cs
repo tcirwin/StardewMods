@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using StardewValley;
 using SObject = StardewValley.Object;
@@ -8,41 +7,17 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A bee house that accepts input and provides output.</summary>
     /// <remarks>See the game's machine logic in <see cref="SObject.performDropDownAction"/>, <see cref="SObject.checkForAction"/>, and <see cref="SObject.minutesElapsed"/>.</remarks>
-    internal class BeeHouseMachine : GenericMachine
+    internal class BeeHouseMachine : GenericObjectMachine<SObject>
     {
-        /*********
-        ** Properties
-        *********/
-        /// <summary>The location containing the machine.</summary>
-        private readonly GameLocation Location;
-
-        /// <summary>The machine's position in its location.</summary>
-        private readonly Vector2 Tile;
-
-        /// <summary>The honey types produced by this beehouse indexed by input ID.</summary>
-        private readonly IDictionary<int, SObject.HoneyType> HoneyTypes = new Dictionary<int, SObject.HoneyType>
-        {
-            [376] = SObject.HoneyType.Poppy,
-            [591] = SObject.HoneyType.Tulip,
-            [593] = SObject.HoneyType.SummerSpangle,
-            [595] = SObject.HoneyType.FairyRose,
-            [597] = SObject.HoneyType.BlueJazz
-        };
-
-
         /*********
         ** Public methods
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
         /// <param name="location">The location containing the machine.</param>
-        /// <param name="tile">The machine's position in its location.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
         public BeeHouseMachine(SObject machine, GameLocation location, Vector2 tile)
-            : base(machine)
-        {
-            this.Location = location;
-            this.Tile = tile;
-        }
+            : base(machine, location, tile) { }
 
         /// <summary>Get the machine's processing state.</summary>
         public override MachineState GetState()
@@ -61,28 +36,25 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
                 return null;
 
             // get flower data
-            SObject.HoneyType type = SObject.HoneyType.Wild;
-            string prefix = type.ToString();
+            int flowerId = -1;
+            string flowerName = null;
             int addedPrice = 0;
-            Crop flower = Utility.findCloseFlower(this.Location, this.Tile);
+            Crop flower = Utility.findCloseFlower(this.Location, this.Machine.TileLocation, 5, crop => !crop.forageCrop.Value);
             if (flower != null)
             {
-                string[] flowerData = Game1.objectInformation[flower.indexOfHarvest.Value].Split('/');
-                prefix = flowerData[0];
-                addedPrice = Convert.ToInt32(flowerData[1]) * 2;
-                if (!this.HoneyTypes.TryGetValue(flower.indexOfHarvest.Value, out type))
-                    type = SObject.HoneyType.Wild;
+                flowerId = flower.indexOfHarvest.Value;
+                string[] fields = Game1.objectInformation[flowerId].Split('/');
+                flowerName = fields[0];
+                addedPrice = Convert.ToInt32(fields[1]) * 2;
             }
 
             // build object
             SObject result = new SObject(output.ParentSheetIndex, output.Stack)
             {
-                name = $"{prefix} Honey",
+                name = $"{flowerName ?? "Wild"} Honey",
                 Price = output.Price + addedPrice
             };
-            result.honeyType.Value = type;
-
-            // yield
+            result.preservedParentSheetIndex.Value = flowerId;
             return new TrackedItem(result, onEmpty: this.Reset);
         }
 

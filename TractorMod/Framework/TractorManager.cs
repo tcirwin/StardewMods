@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -7,12 +8,12 @@ using Microsoft.Xna.Framework.Input;
 using Netcode;
 using Pathoschild.Stardew.Common;
 using Pathoschild.Stardew.TractorMod.Framework.Attachments;
+using Pathoschild.Stardew.TractorMod.Framework.Config;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Characters;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
-using SFarmer = StardewValley.Farmer;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod.Framework
@@ -21,7 +22,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework
     internal sealed class TractorManager
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The unique buff ID for the tractor speed.</summary>
         private readonly int BuffUniqueID = 58012397;
@@ -44,11 +45,20 @@ namespace Pathoschild.Stardew.TractorMod.Framework
         /// <summary>The mod settings.</summary>
         private readonly ModConfig Config;
 
+        /// <summary>The configured key bindings.</summary>
+        private readonly ModConfigKeys Keys;
+
         /// <summary>The number of ticks since the tractor last checked for an action to perform.</summary>
         private int SkippedActionTicks;
 
         /// <summary>Whether the player was riding the tractor during the last tick.</summary>
         private bool WasRiding;
+
+        /// <summary>Whether the tractor effects were enabled during the last tick.</summary>
+        private bool WasEnabled;
+
+        /// <summary>The tractor location during the last tick.</summary>
+        private GameLocation WasLocation;
 
         /// <summary>The rider health to maintain if they're invincible.</summary>
         private int RiderHealth;
@@ -66,12 +76,14 @@ namespace Pathoschild.Stardew.TractorMod.Framework
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The mod settings.</param>
+        /// <param name="keys">The configured key bindings.</param>
         /// <param name="translation">Provides translations from the mod's i18n folder.</param>
         /// <param name="reflection">Simplifies access to private game code.</param>
         /// <param name="attachments">The tractor attachments to apply.</param>
-        public TractorManager(ModConfig config, ITranslationHelper translation, IReflectionHelper reflection, IEnumerable<IAttachment> attachments)
+        public TractorManager(ModConfig config, ModConfigKeys keys, ITranslationHelper translation, IReflectionHelper reflection, IEnumerable<IAttachment> attachments)
         {
             this.Config = config;
+            this.Keys = keys;
             this.Translation = translation;
             this.Reflection = reflection;
             this.Attachments = attachments.ToArray();
@@ -118,13 +130,25 @@ namespace Pathoschild.Stardew.TractorMod.Framework
         /// <summary>Update tractor effects and actions in the game.</summary>
         public void Update()
         {
-            // track health for invincibility
-            if (this.Config.InvincibleOnTractor && this.IsCurrentPlayerRiding != this.WasRiding)
+            // update when player mounts or unmounts
+            if (this.IsCurrentPlayerRiding != this.WasRiding)
             {
-                if (this.IsCurrentPlayerRiding)
-                    this.RiderHealth = Game1.player.health;
                 this.WasRiding = this.IsCurrentPlayerRiding;
+
+                // track health for invincibility
+                if (this.Config.InvincibleOnTractor && this.IsCurrentPlayerRiding)
+                    this.RiderHealth = Game1.player.health;
+
+                // reset held-down tool power
+                Game1.player.toolPower = 0;
             }
+
+            // detect activation or location change
+            bool enabled = this.IsEnabled();
+            if (enabled && (!this.WasEnabled || !object.ReferenceEquals(this.WasLocation, Game1.currentLocation)))
+                this.OnActivated(Game1.currentLocation);
+            this.WasEnabled = enabled;
+            this.WasLocation = Game1.currentLocation;
 
             // apply riding effects
             if (this.IsCurrentPlayerRiding && Game1.activeClickableMenu == null)
@@ -141,9 +165,12 @@ namespace Pathoschild.Stardew.TractorMod.Framework
                 // apply tractor buff
                 this.UpdateBuff();
 
-                // apply tools
-                if (this.UpdateCooldown() && this.IsEnabled())
-                    this.UpdateAttachmentEffects();
+                // apply tool effects
+                if (this.UpdateCooldown())
+                {
+                    if (enabled)
+                        this.UpdateAttachmentEffects();
+                }
             }
         }
 
@@ -190,7 +217,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework
 
             // hold-to-activate mode
             KeyboardState state = Keyboard.GetState();
-            return this.Config.Controls.HoldToActivate.Any(button => button.TryGetKeyboard(out Keys key) && state.IsKeyDown(key));
+            return this.Keys.HoldToActivate.Any(button => button.TryGetKeyboard(out Keys key) && state.IsKeyDown(key));
         }
 
         /// <summary>Apply the tractor buff to the current player.</summary>
@@ -218,11 +245,19 @@ namespace Pathoschild.Stardew.TractorMod.Framework
             return true;
         }
 
+        /// <summary>Notify attachments that effects have been enabled for a location.</summary>
+        /// <param name="location">The current tractor location.</param>
+        private void OnActivated(GameLocation location)
+        {
+            foreach (IAttachment attachment in this.Attachments)
+                attachment.OnActivated(location);
+        }
+
         /// <summary>Apply any effects for the current tractor attachment.</summary>
         private void UpdateAttachmentEffects()
         {
             // get context
-            SFarmer player = Game1.player;
+            Farmer player = Game1.player;
             GameLocation location = Game1.currentLocation;
             Tool tool = player.CurrentTool;
             Item item = player.CurrentItem;
@@ -235,7 +270,8 @@ namespace Pathoschild.Stardew.TractorMod.Framework
             // get tile grid to affect
             // This must be done outside the temporary interaction block below, since that dismounts
             // the player which changes their position from what the player may expect.
-            Vector2[] grid = this.GetTileGrid(Game1.player.getTileLocation(), this.Config.Distance).ToArray();
+            Vector2 origin = Game1.player.getTileLocation();
+            Vector2[] grid = this.GetTileGrid(origin, this.Config.Distance).ToArray();
 
             // apply tools
             this.TemporarilyFakeInteraction(() =>
@@ -243,8 +279,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework
                 foreach (Vector2 tile in grid)
                 {
                     // face tile to avoid game skipping interaction
-                    player.Position = new Vector2(tile.X - 1, tile.Y) * Game1.tileSize;
-                    player.FacingDirection = 1;
+                    this.GetRadialAdjacentTile(origin, tile, out Vector2 adjacentTile, out int facingDirection);
+                    player.Position = adjacentTile * Game1.tileSize;
+                    player.FacingDirection = facingDirection;
 
                     // apply attachment effects
                     location.objects.TryGetValue(tile, out SObject tileObj);
@@ -266,7 +303,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework
         /// <param name="tool">The tool selected by the player (if any).</param>
         /// <param name="item">The item selected by the player (if any).</param>
         /// <param name="location">The current location.</param>
-        private IEnumerable<IAttachment> GetApplicableAttachmentsAfterCooldown(SFarmer player, Tool tool, Item item, GameLocation location)
+        private IEnumerable<IAttachment> GetApplicableAttachmentsAfterCooldown(Farmer player, Tool tool, Item item, GameLocation location)
         {
             foreach (IAttachment attachment in this.Attachments)
             {
@@ -307,13 +344,46 @@ namespace Pathoschild.Stardew.TractorMod.Framework
             }
         }
 
+        /// <summary>Get the tile coordinate which is adjacent to the given <paramref name="tile"/> along a radial line from the tractor position.</summary>
+        /// <param name="origin">The tile containing the tractor.</param>
+        /// <param name="tile">The tile to face.</param>
+        /// <param name="adjacent">The tile radially adjacent to the <paramref name="tile"/>.</param>
+        /// <param name="facingDirection">The direction to face.</param>
+        private void GetRadialAdjacentTile(Vector2 origin, Vector2 tile, out Vector2 adjacent, out int facingDirection)
+        {
+            facingDirection = Utility.getDirectionFromChange(tile, origin);
+            switch (facingDirection)
+            {
+                case Game1.up:
+                    adjacent = new Vector2(tile.X, tile.Y + 1);
+                    break;
+
+                case Game1.down:
+                    adjacent = new Vector2(tile.X, tile.Y - 1);
+                    break;
+
+                case Game1.left:
+                    adjacent = new Vector2(tile.X + 1, tile.Y);
+                    break;
+
+                case Game1.right:
+                    adjacent = new Vector2(tile.X - 1, tile.Y);
+                    break;
+
+                default:
+                    adjacent = tile;
+                    break;
+            }
+        }
+
         /// <summary>Temporarily dismount and set up the player to interact with a tile, then return it to the previous state afterwards.</summary>
         /// <param name="action">The action to perform.</param>
+        [SuppressMessage("SMAPI", "AvoidImplicitNetFieldCast", Justification = "Deliberately accesses net field instance.")]
         private void TemporarilyFakeInteraction(Action action)
         {
             // get references
             // (Note: change net values directly to avoid sync bugs, since the value will be reset when we're done.)
-            SFarmer player = Game1.player;
+            Farmer player = Game1.player;
             NetRef<Horse> mountField = this.Reflection.GetField<NetRef<Horse>>(Game1.player, "netMount").GetValue();
             IReflectedField<Horse> mountFieldValue = this.Reflection.GetField<Horse>(mountField, "value");
             IReflectedField<Vector2> mountPositionValue = this.Reflection.GetField<Vector2>(player.mount.position.Field, "value");
@@ -327,7 +397,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework
             Vector2 position = player.Position;
             int facingDirection = player.FacingDirection;
             int currentToolIndex = player.CurrentToolIndex;
-            bool canMove = Game1.player.canMove; // fix player frozen due to animations when performing an action
+            bool canMove = player.canMove; // fix player frozen due to animations when performing an action
 
             // move mount out of the way
             mountFieldValue.SetValue(null);
@@ -351,7 +421,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework
                 player.Position = position;
                 player.FacingDirection = facingDirection;
                 player.CurrentToolIndex = currentToolIndex;
-                Game1.player.canMove = canMove;
+                player.canMove = canMove;
             }
         }
     }

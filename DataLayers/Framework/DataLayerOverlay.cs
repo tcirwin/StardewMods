@@ -5,6 +5,8 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Pathoschild.Stardew.Common;
 using Pathoschild.Stardew.Common.UI;
+using StardewModdingAPI;
+using StardewModdingAPI.Events;
 using StardewValley;
 using XRectangle = xTile.Dimensions.Rectangle;
 
@@ -14,7 +16,7 @@ namespace Pathoschild.Stardew.DataLayers.Framework
     internal class DataLayerOverlay : BaseOverlay
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /*****
         ** Constants and config
@@ -49,9 +51,6 @@ namespace Pathoschild.Stardew.DataLayers.Framework
         /// <summary>An empty set of tile groups.</summary>
         private readonly TileGroup[] EmptyTileGroups = new TileGroup[0];
 
-        /// <summary>The current layer to render.</summary>
-        private ILayer CurrentLayer;
-
         /// <summary>The legend entries to show.</summary>
         private LegendEntry[] Legend;
 
@@ -66,16 +65,26 @@ namespace Pathoschild.Stardew.DataLayers.Framework
 
 
         /*********
+        ** Accessors
+        *********/
+        /// <summary>The current layer being rendered.</summary>
+        public ILayer CurrentLayer { get; private set; }
+
+
+        /*********
         ** Public methods
         *********/
         /// <summary>Construct an instance.</summary>
+        /// <param name="events">The SMAPI events available for mods.</param>
+        /// <param name="inputHelper">An API for checking and changing input state.</param>
         /// <param name="layers">The data layers to render.</param>
         /// <param name="drawOverlay">Get whether the overlay should be drawn.</param>
         /// <param name="combineOverlappingBorders">When two groups of the same color overlap, draw one border around their edges instead of their individual borders.</param>
-        public DataLayerOverlay(ILayer[] layers, Func<bool> drawOverlay, bool combineOverlappingBorders)
+        public DataLayerOverlay(IModEvents events, IInputHelper inputHelper, ILayer[] layers, Func<bool> drawOverlay, bool combineOverlappingBorders)
+            : base(events, inputHelper)
         {
             if (!layers.Any())
-                throw new InvalidOperationException("Can't initialise the data layers overlay with no data layers.");
+                throw new InvalidOperationException("Can't initialize the data layers overlay with no data layers.");
 
             this.Layers = layers.OrderBy(p => p.Name).ToArray();
             this.DrawOverlay = drawOverlay;
@@ -258,7 +267,7 @@ namespace Pathoschild.Stardew.DataLayers.Framework
                     if (!data.BorderColors.Any())
                         continue;
 
-                    // get neighbours
+                    // get neighbors
                     tiles.TryGetValue(new Vector2(x - 1, y), out TileDrawData left);
                     tiles.TryGetValue(new Vector2(x + 1, y), out TileDrawData right);
                     tiles.TryGetValue(new Vector2(x, y - 1), out TileDrawData top);

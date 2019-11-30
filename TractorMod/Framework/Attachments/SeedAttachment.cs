@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Pathoschild.Stardew.TractorMod.Framework.Config;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using SObject = StardewValley.Object;
@@ -10,10 +11,10 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class SeedAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The attachment settings.</summary>
-        private readonly SeedsConfig Config;
+        private readonly GenericAttachmentConfig Config;
 
 
         /*********
@@ -21,7 +22,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The attachment settings.</param>
-        public SeedAttachment(SeedsConfig config)
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public SeedAttachment(GenericAttachmentConfig config, IReflectionHelper reflection)
+            : base(reflection)
         {
             this.Config = config;
         }

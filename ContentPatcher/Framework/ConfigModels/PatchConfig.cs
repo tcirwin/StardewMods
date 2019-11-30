@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
+using Newtonsoft.Json.Linq;
 using Pathoschild.Stardew.Common.Utilities;
 
 namespace ContentPatcher.Framework.ConfigModels
@@ -22,18 +24,15 @@ namespace ContentPatcher.Framework.ConfigModels
         /// <summary>The asset key to change.</summary>
         public string Target { get; set; }
 
+        /// <summary>The local file to load.</summary>
+        public string FromFile { get; set; }
+
         /// <summary>Whether to apply this patch.</summary>
         /// <remarks>This must be a string to support config tokens.</remarks>
         public string Enabled { get; set; } = "true";
 
         /// <summary>The criteria to apply. See readme for valid values.</summary>
         public InvariantDictionary<string> When { get; set; }
-
-        /****
-        ** Some actions
-        ****/
-        /// <summary>The local file to load.</summary>
-        public string FromFile { get; set; }
 
         /****
         ** EditImage
@@ -51,10 +50,19 @@ namespace ContentPatcher.Framework.ConfigModels
         ** EditData
         ****/
         /// <summary>The data records to edit.</summary>
-        public IDictionary<string, string> Entries { get; set; }
+        public IDictionary<string, JToken> Entries { get; set; }
 
         /// <summary>The individual fields to edit in data records.</summary>
-        public IDictionary<string, IDictionary<int, string>> Fields { get; set; }
+        public IDictionary<string, IDictionary<string, JToken>> Fields { get; set; }
+
+        /// <summary>The records to reorder, if the target is a list asset.</summary>
+        public PatchMoveEntryConfig[] MoveEntries { get; set; }
+
+        /****
+        ** EditMap
+        ****/
+        /// <summary>The map properties to edit.</summary>
+        public IDictionary<string, string> MapProperties { get; set; }
 
 
         /*********
@@ -64,7 +72,7 @@ namespace ContentPatcher.Framework.ConfigModels
         public PatchConfig() { }
 
         /// <summary>Construct an instance.</summary>
-        /// <param name="other">The other patch to clone.</param>
+        /// <param name="other">The other instance to copy.</param>
         public PatchConfig(PatchConfig other)
         {
             this.LogName = other.LogName;
@@ -76,8 +84,9 @@ namespace ContentPatcher.Framework.ConfigModels
             this.FromArea = other.FromArea;
             this.ToArea = other.ToArea;
             this.PatchMode = other.PatchMode;
-            this.Entries = other.Entries != null ? new Dictionary<string, string>(other.Entries) : null;
-            this.Fields = other.Fields != null ? new Dictionary<string, IDictionary<int, string>>(other.Fields) : null;
+            this.Entries = other.Entries?.ToDictionary(p => p.Key, p => p.Value);
+            this.Fields = other.Fields?.ToDictionary(p => p.Key, p => p.Value);
+            this.MoveEntries = other.MoveEntries?.Select(p => new PatchMoveEntryConfig(p)).ToArray();
         }
     }
 }

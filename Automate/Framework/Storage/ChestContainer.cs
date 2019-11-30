@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Xna.Framework;
 using StardewValley;
 using StardewValley.Objects;
 
@@ -11,7 +12,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Storage
     internal class ChestContainer : IContainer
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The underlying chest.</summary>
         private readonly Chest Chest;
@@ -23,15 +24,25 @@ namespace Pathoschild.Stardew.Automate.Framework.Storage
         /// <summary>The container name (if any).</summary>
         public string Name => this.Chest.Name;
 
+        /// <summary>The location which contains the container.</summary>
+        public GameLocation Location { get; }
+
+        /// <summary>The tile area covered by the container.</summary>
+        public Rectangle TileArea { get; }
+
 
         /*********
         ** Public methods
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="chest">The underlying chest.</param>
-        public ChestContainer(Chest chest)
+        /// <param name="location">The location which contains the container.</param>
+        /// <param name="tile">The tile area covered by the container.</param>
+        public ChestContainer(Chest chest, GameLocation location, Vector2 tile)
         {
             this.Chest = chest;
+            this.Location = location;
+            this.TileArea = new Rectangle((int)tile.X, (int)tile.Y, 1, 1);
         }
 
         /// <summary>Store an item stack.</summary>
@@ -49,7 +60,9 @@ namespace Pathoschild.Stardew.Automate.Framework.Storage
             {
                 if (slot != null && stack.Sample.canStackWith(slot))
                 {
-                    int added = stack.Count - slot.addToStack(stack.Count);
+                    Item sample = stack.Sample.getOne();
+                    sample.Stack = stack.Count;
+                    int added = stack.Count - slot.addToStack(sample);
                     stack.Reduce(added);
                     if (stack.Count <= 0)
                         return;
@@ -125,7 +138,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Storage
             }
         }
 
-        /// <summary>Get a tracked item sync'd with the chest inventory.</summary>
+        /// <summary>Get a tracked item synced with the chest inventory.</summary>
         /// <param name="item">The item to track.</param>
         private ITrackedStack GetTrackedItem(Item item)
         {

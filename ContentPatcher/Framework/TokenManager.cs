@@ -5,6 +5,7 @@ using System.Linq;
 using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.Constants;
 using ContentPatcher.Framework.Tokens;
+using ContentPatcher.Framework.Tokens.ValueProviders;
 using Pathoschild.Stardew.Common.Utilities;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
@@ -16,13 +17,26 @@ namespace ContentPatcher.Framework
     internal class TokenManager : IContext
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The available global tokens.</summary>
-        private readonly GenericTokenContext GlobalContext = new GenericTokenContext();
+        private readonly GenericTokenContext GlobalContext;
 
         /// <summary>The available tokens defined within the context of each content pack.</summary>
         private readonly Dictionary<IContentPack, ModTokenContext> LocalTokens = new Dictionary<IContentPack, ModTokenContext>();
+
+        /// <summary>The installed mod IDs.</summary>
+        private readonly InvariantHashSet InstalledMods;
+
+        /// <summary>Simplifies access to private code.</summary>
+        private readonly IReflectionHelper Reflection;
+
+
+        /*********
+        ** Accessors
+        *********/
+        /// <summary>Whether the basic save info is loaded (including the date, weather, and player info). The in-game locations and world may not exist yet.</summary>
+        public bool IsBasicInfoLoaded { get; set; }
 
 
         /*********
@@ -31,46 +45,80 @@ namespace ContentPatcher.Framework
         /// <summary>Construct an instance.</summary>
         /// <param name="contentHelper">The content helper from which to load data assets.</param>
         /// <param name="installedMods">The installed mod IDs.</param>
-        public TokenManager(IContentHelper contentHelper, IEnumerable<string> installedMods)
+        /// <param name="modTokens">The custom tokens provided by mods.</param>
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public TokenManager(IContentHelper contentHelper, InvariantHashSet installedMods, IEnumerable<IToken> modTokens, IReflectionHelper reflection)
         {
-            foreach (IToken token in this.GetGlobalTokens(contentHelper, installedMods))
-                this.GlobalContext.Tokens[token.Name] = token;
+            this.InstalledMods = installedMods;
+            this.GlobalContext = new GenericTokenContext(this.IsModInstalled);
+            this.Reflection = reflection;
+
+            foreach (IToken modToken in modTokens)
+                this.GlobalContext.Tokens[modToken.Name] = modToken;
+            foreach (IValueProvider valueProvider in this.GetGlobalValueProviders(contentHelper, installedMods))
+                this.GlobalContext.Tokens[valueProvider.Name] = new GenericToken(valueProvider);
         }
 
         /// <summary>Get the tokens which are defined for a specific content pack. This returns a reference to the list, which can be held for a live view of the tokens. If the content pack isn't currently tracked, this will add it.</summary>
         /// <param name="contentPack">The content pack to manage.</param>
         public ModTokenContext TrackLocalTokens(IContentPack contentPack)
         {
+            string scope = contentPack.Manifest.UniqueID;
+
             if (!this.LocalTokens.TryGetValue(contentPack, out ModTokenContext localTokens))
             {
-                this.LocalTokens[contentPack] = localTokens = new ModTokenContext(this);
-                foreach (IToken token in this.GetLocalTokens(contentPack))
-                    localTokens.Add(token);
+                this.LocalTokens[contentPack] = localTokens = new ModTokenContext(scope, this);
+                foreach (IValueProvider valueProvider in this.GetLocalValueProviders(contentPack))
+                    localTokens.Add(new GenericToken(valueProvider, scope));
             }
 
             return localTokens;
         }
 
-        /// <summary>Update the current context.</summary>
-        public void UpdateContext()
+        /// <summary>Get the token context for a given mod ID.</summary>
+        /// <param name="contentPackID">The content pack ID to search for.</param>
+        /// <exception cref="KeyNotFoundException">There's no content pack registered with the given <paramref name="contentPackID"/>.</exception>
+        public IContext GetContextFor(string contentPackID)
         {
+            foreach (var pair in this.LocalTokens)
+            {
+                if (pair.Key.Manifest.UniqueID.Equals(contentPackID, StringComparison.InvariantCultureIgnoreCase))
+                    return pair.Value;
+            }
+
+            throw new KeyNotFoundException($"There's no content pack registered for ID '{contentPackID}'.");
+        }
+
+        /// <summary>Update the current context.</summary>
+        /// <param name="globalChangedTokens">The global token values which changed, or <c>null</c> to update all tokens.</param>
+        public void UpdateContext(InvariantHashSet globalChangedTokens = null)
+        {
+            // update global tokens
             foreach (IToken token in this.GlobalContext.Tokens.Values)
             {
-                if (token.IsMutable)
+                if (token.IsMutable && globalChangedTokens?.Contains(token.Name) != false)
                     token.UpdateContext(this);
             }
 
+            // update mod contexts
             foreach (ModTokenContext localContext in this.LocalTokens.Values)
-                localContext.UpdateContext(this);
+                localContext.UpdateContext(globalChangedTokens);
         }
 
         /****
         ** IContext
         ****/
+        /// <summary>Get whether a mod is installed.</summary>
+        /// <param name="id">The mod ID.</param>
+        public bool IsModInstalled(string id)
+        {
+            return this.InstalledMods.Contains(id);
+        }
+
         /// <summary>Get whether the context contains the given token.</summary>
         /// <param name="name">The token name.</param>
         /// <param name="enforceContext">Whether to only consider tokens that are available in the context.</param>
-        public bool Contains(TokenName name, bool enforceContext)
+        public bool Contains(string name, bool enforceContext)
         {
             return this.GlobalContext.Contains(name, enforceContext);
         }
@@ -79,7 +127,7 @@ namespace ContentPatcher.Framework
         /// <param name="name">The token name.</param>
         /// <param name="enforceContext">Whether to only consider tokens that are available in the context.</param>
         /// <returns>Returns the matching token, or <c>null</c> if none was found.</returns>
-        public IToken GetToken(TokenName name, bool enforceContext)
+        public IToken GetToken(string name, bool enforceContext)
         {
             return this.GlobalContext.GetToken(name, enforceContext);
         }
@@ -93,60 +141,80 @@ namespace ContentPatcher.Framework
 
         /// <summary>Get the current values of the given token for comparison.</summary>
         /// <param name="name">The token name.</param>
+        /// <param name="input">The input argument, if any.</param>
         /// <param name="enforceContext">Whether to only consider tokens that are available in the context.</param>
         /// <returns>Return the values of the matching token, or an empty list if the token doesn't exist.</returns>
         /// <exception cref="ArgumentNullException">The specified key is null.</exception>
-        public IEnumerable<string> GetValues(TokenName name, bool enforceContext)
+        public IEnumerable<string> GetValues(string name, ITokenString input, bool enforceContext)
         {
-            return this.GlobalContext.GetValues(name, enforceContext);
+            return this.GlobalContext.GetValues(name, input, enforceContext);
         }
 
 
         /*********
         ** Private methods
         *********/
-        /// <summary>Get the global tokens with which to initialise the token manager.</summary>
+        /// <summary>Get the global value providers with which to initialize the token manager.</summary>
         /// <param name="contentHelper">The content helper from which to load data assets.</param>
         /// <param name="installedMods">The installed mod IDs.</param>
-        private IEnumerable<IToken> GetGlobalTokens(IContentHelper contentHelper, IEnumerable<string> installedMods)
+        private IEnumerable<IValueProvider> GetGlobalValueProviders(IContentHelper contentHelper, InvariantHashSet installedMods)
         {
-            // installed mods
-            yield return new ImmutableToken(ConditionType.HasMod.ToString(), new InvariantHashSet(installedMods), canHaveMultipleValues: true);
+            bool NeedsBasicInfo() => this.IsBasicInfoLoaded;
 
-            // language
-            yield return new ConditionTypeToken(ConditionType.Language, () => contentHelper.CurrentLocaleConstant.ToString(), needsLoadedSave: false, allowedValues: Enum.GetNames(typeof(LocalizedContentManager.LanguageCode)).Where(p => p != LocalizedContentManager.LanguageCode.th.ToString()));
+            // date and weather
+            yield return new ConditionTypeValueProvider(ConditionType.Day, () => SDate.Now().Day.ToString(CultureInfo.InvariantCulture), NeedsBasicInfo, allowedValues: Enumerable.Range(0, 29).Select(p => p.ToString())); // day 0 = new-game intro
+            yield return new ConditionTypeValueProvider(ConditionType.DayEvent, () => this.GetDayEvent(contentHelper), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.DayOfWeek, () => SDate.Now().DayOfWeek.ToString(), NeedsBasicInfo, allowedValues: Enum.GetNames(typeof(DayOfWeek)));
+            yield return new ConditionTypeValueProvider(ConditionType.DaysPlayed, () => Game1.stats.DaysPlayed.ToString(CultureInfo.InvariantCulture), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.Season, () => SDate.Now().Season, NeedsBasicInfo, allowedValues: new[] { "Spring", "Summer", "Fall", "Winter" });
+            yield return new ConditionTypeValueProvider(ConditionType.Year, () => SDate.Now().Year.ToString(CultureInfo.InvariantCulture), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.Weather, this.GetCurrentWeather, NeedsBasicInfo, allowedValues: Enum.GetNames(typeof(Weather)));
 
-            // in-game date
-            yield return new ConditionTypeToken(ConditionType.Season, () => SDate.Now().Season, needsLoadedSave: true, allowedValues: new[] { "Spring", "Summer", "Fall", "Winter" });
-            yield return new ConditionTypeToken(ConditionType.Day, () => SDate.Now().Day.ToString(CultureInfo.InvariantCulture), needsLoadedSave: true, allowedValues: Enumerable.Range(1, 28).Select(p => p.ToString()));
-            yield return new ConditionTypeToken(ConditionType.DayOfWeek, () => SDate.Now().DayOfWeek.ToString(), needsLoadedSave: true, allowedValues: Enum.GetNames(typeof(DayOfWeek)));
-            yield return new ConditionTypeToken(ConditionType.Year, () => SDate.Now().Year.ToString(CultureInfo.InvariantCulture), needsLoadedSave: true);
+            // player
+            yield return new ConditionTypeValueProvider(ConditionType.HasFlag, this.GetFlags, NeedsBasicInfo);
+            yield return new HasProfessionValueProvider(NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.HasReadLetter, this.GetReadLetters, NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.HasSeenEvent, this.GetEventsSeen, NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.HasDialogueAnswer, this.GetDialogueAnswers, NeedsBasicInfo);
+            yield return new HasWalletItemValueProvider(NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.IsMainPlayer, () => Context.IsMainPlayer.ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.IsOutdoors, () => Game1.currentLocation?.IsOutdoors.ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.LocationName, () => Game1.currentLocation?.Name, NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.PlayerGender, () => (Game1.player.IsMale ? Gender.Male : Gender.Female).ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.PlayerName, () => Game1.player.Name, NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.PreferredPet, () => (Game1.player.catPerson ? PetType.Cat : PetType.Dog).ToString(), NeedsBasicInfo);
+            yield return new SkillLevelValueProvider(NeedsBasicInfo);
 
-            // other in-game conditions
-            yield return new ConditionTypeToken(ConditionType.DayEvent, () => this.GetDayEvent(contentHelper), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.FarmCave, () => this.GetEnum(Game1.player.caveChoice.Value, FarmCaveType.None).ToString(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.FarmhouseUpgrade, () => Game1.player.HouseUpgradeLevel.ToString(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.FarmName, () => Game1.player.farmName.Value, needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.FarmType, () => this.GetEnum(Game1.whichFarm, FarmType.Custom).ToString(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.HasFlag, () => this.GetMailFlags(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.HasSeenEvent, () => this.GetEventsSeen(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.PlayerGender, () => (Game1.player.IsMale ? Gender.Male : Gender.Female).ToString(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.PreferredPet, () => (Game1.player.catPerson ? PetType.Cat : PetType.Dog).ToString(), needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.PlayerName, () => Game1.player.Name, needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.Spouse, () => Game1.player?.spouse, needsLoadedSave: true);
-            yield return new ConditionTypeToken(ConditionType.Weather, () => this.GetCurrentWeather(), needsLoadedSave: true, allowedValues: Enum.GetNames(typeof(Weather)));
-            yield return new HasProfessionToken();
-            yield return new HasWalletItemToken();
-            yield return new SkillLevelToken();
-            yield return new VillagerRelationshipToken();
-            yield return new VillagerHeartsToken();
+            // relationships
+            yield return new VillagerHeartsValueProvider();
+            yield return new VillagerRelationshipValueProvider();
+            yield return new ConditionTypeValueProvider(ConditionType.Spouse, () => Game1.player?.spouse, NeedsBasicInfo);
+
+            // world
+            yield return new ConditionTypeValueProvider(ConditionType.FarmCave, () => this.GetEnum(Game1.player.caveChoice.Value, FarmCaveType.None).ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.FarmhouseUpgrade, () => Game1.player.HouseUpgradeLevel.ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.FarmName, () => Game1.player.farmName.Value, NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.FarmType, () => this.GetEnum(Game1.whichFarm, FarmType.Custom).ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.IsCommunityCenterComplete, () => this.GetIsCommunityCenterComplete().ToString(), NeedsBasicInfo);
+            yield return new ConditionTypeValueProvider(ConditionType.IsJojaMartComplete, () => this.GetIsJojaMartComplete().ToString(), NeedsBasicInfo);
+            yield return new HavingChildValueProvider(ConditionType.Pregnant, NeedsBasicInfo);
+            yield return new HavingChildValueProvider(ConditionType.HavingChild, NeedsBasicInfo);
+
+            // string manipulation
+            yield return new RangeValueProvider();
+
+            // other
+            yield return new ImmutableValueProvider(ConditionType.HasMod.ToString(), installedMods, canHaveMultipleValues: true);
+            yield return new HasValueValueProvider();
+            yield return new ConditionTypeValueProvider(ConditionType.Language, () => contentHelper.CurrentLocaleConstant.ToString(), allowedValues: Enum.GetNames(typeof(LocalizedContentManager.LanguageCode)).Where(p => p != LocalizedContentManager.LanguageCode.th.ToString()));
         }
 
-        /// <summary>Get the local tokens with which to initialise a local context.</summary>
+        /// <summary>Get the local value providers with which to initialize a local context.</summary>
         /// <param name="contentPack">The content pack for which to get tokens.</param>
-        private IEnumerable<IToken> GetLocalTokens(IContentPack contentPack)
+        private IEnumerable<IValueProvider> GetLocalValueProviders(IContentPack contentPack)
         {
-            yield return new HasFileToken(contentPack.DirectoryPath);
+            yield return new HasFileValueProvider(contentPack.DirectoryPath);
+            yield return new RandomValueProvider(); // per-pack for more reproducible selection when troubleshooting
         }
 
         /// <summary>Get a constant for a given value.</summary>
@@ -163,15 +231,14 @@ namespace ContentPatcher.Framework
         /// <summary>Get the current weather from the game state.</summary>
         private string GetCurrentWeather()
         {
-            if (Utility.isFestivalDay(Game1.dayOfMonth, Game1.currentSeason) || Game1.weddingToday)
+            if (Utility.isFestivalDay(Game1.dayOfMonth, Game1.currentSeason) || (SaveGame.loaded?.weddingToday ?? Game1.weddingToday))
                 return Weather.Sun.ToString();
 
             if (Game1.isSnowing)
                 return Weather.Snow.ToString();
             if (Game1.isRaining)
                 return (Game1.isLightning ? Weather.Storm : Weather.Rain).ToString();
-
-            if (Game1.isDebrisWeather)
+            if (SaveGame.loaded?.isDebrisWeather ?? Game1.isDebrisWeather)
                 return Weather.Wind.ToString();
 
             return Weather.Sun.ToString();
@@ -189,18 +256,48 @@ namespace ContentPatcher.Framework
                 .Select(p => p.ToString(CultureInfo.InvariantCulture));
         }
 
-        /// <summary>Get the letter IDs and mail flags set for the player.</summary>
+        /// <summary>Get the letter IDs read by the player.</summary>
         /// <remarks>See game logic in <see cref="Farmer.hasOrWillReceiveMail"/>.</remarks>
-        private IEnumerable<string> GetMailFlags()
+        private IEnumerable<string> GetReadLetters()
         {
-            Farmer player = Game1.player;
-            if (player == null)
+            if (Game1.player == null)
                 return new string[0];
+            return Game1.player.mailReceived;
+        }
 
-            return player
-                .mailReceived
-                .Union(player.mailForTomorrow)
-                .Union(player.mailbox);
+        /// <summary>Get the letter IDs, mail flags, and world state IDs set for the player.</summary>
+        /// <remarks>See mail logic in <see cref="Farmer.hasOrWillReceiveMail"/>.</remarks>
+        private IEnumerable<string> GetFlags()
+        {
+            // mail flags
+            if (Game1.player != null)
+            {
+                foreach (string flag in Game1.player.mailReceived.Union(Game1.player.mailForTomorrow).Union(Game1.player.mailbox))
+                    yield return flag;
+            }
+
+            // world state flags
+            foreach (string flag in Game1.worldStateIDs)
+                yield return flag;
+        }
+
+        /// <summary>Get whether the community center is complete.</summary>
+        /// <remarks>See game logic in <see cref="StardewValley.Locations.Town.resetLocalState"/>.</remarks>
+        private bool GetIsCommunityCenterComplete()
+        {
+            return Game1.MasterPlayer.mailReceived.Contains("ccIsComplete") || Game1.MasterPlayer.hasCompletedCommunityCenter();
+        }
+
+        /// <summary>Get whether the JojaMart is complete.</summary>
+        /// <remarks>See game logic in <see cref="GameLocation"/> for the 'C' precondition.</remarks>
+        private bool GetIsJojaMartComplete()
+        {
+            if (!Game1.MasterPlayer.mailReceived.Contains("JojaMember"))
+                return false;
+
+            GameLocation town = Game1.getLocationFromName("Town");
+            return this.Reflection.GetMethod(town, "checkJojaCompletePrerequisite").Invoke<bool>();
+
         }
 
         /// <summary>Get the name for today's day event (e.g. wedding or festival) from the game data.</summary>
@@ -208,7 +305,7 @@ namespace ContentPatcher.Framework
         private string GetDayEvent(IContentHelper contentHelper)
         {
             // marriage
-            if (Game1.weddingToday)
+            if (SaveGame.loaded?.weddingToday ?? Game1.weddingToday)
                 return "wedding";
 
             // festival
@@ -217,6 +314,16 @@ namespace ContentPatcher.Framework
                 return festivalName;
 
             return null;
+        }
+
+        /// <summary>Get the response IDs of dialogue answers given by the player.</summary>
+        private IEnumerable<string> GetDialogueAnswers()
+        {
+            if (Game1.player == null)
+                return new string[0];
+            return Game1.player.dialogueQuestionsAnswered
+                .OrderBy(p => p)
+                .Select(p => p.ToString(CultureInfo.InvariantCulture));
         }
     }
 }

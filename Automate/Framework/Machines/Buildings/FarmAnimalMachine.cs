@@ -15,7 +15,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
         private readonly Farm Farm = null;
         private readonly Barn Barn = null;
 
-        public FarmAnimalMachine(Farm farm, Barn barn): base(barn)
+        public FarmAnimalMachine(Farm farm, Barn barn, GameLocation location) : base(barn, location)
         {
             this.Farm = farm;
             this.Barn = barn;

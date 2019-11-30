@@ -9,6 +9,9 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Constants
         /*********
         ** Accessors
         *********/
+        /// <summary>The maximum stack size for which to calculate a stack price (e.g. to avoid showing a stack size for infinite store inventory).</summary>
+        public static readonly int MaxStackSizeForPricing = 999;
+
         /// <summary>Whether bold text should be enabled where needed.</summary>
         /// <remarks>This is disabled for languages like Chinese which are difficult to read in bold.</remarks>
         public static bool AllowBold => Game1.content.GetCurrentLanguage() != LocalizedContentManager.LanguageCode.zh;
@@ -16,6 +19,9 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Constants
         /// <summary>The largest expected sprite size (measured in tiles).</summary>
         /// <remarks>This is used to account for sprites that extend beyond their tile when searching for targets. These values should be large enough to cover the largest target sprites, but small enough to minimise expensive cursor collision checks.</remarks>
         public static readonly Vector2 MaxTargetSpriteSize = new Vector2(3, 5);
+
+        /// <summary>Equivalent to <see cref="MaxTargetSpriteSize"/>, but for building targets.</summary>
+        public static readonly Vector2 MaxBuildingTargetSpriteSize = new Vector2(10, 10);
 
         /// <summary>The <see cref="StardewValley.Farmer.mailReceived"/> keys referenced by the mod.</summary>
         public static class MailLetters

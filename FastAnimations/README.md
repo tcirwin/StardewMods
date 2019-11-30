@@ -29,6 +29,8 @@ normal speed or `2` for double speed).
   `FishingSpeed`       | 1×      | How fast you cast and reel when fishing (doesn't affect the minigame).<br /><small>(Suggested value: 2×.)</small>
   `MilkSpeed`          | 5×      | How fast you use the milk pail.
   `ShearSpeed`         | 5×      | How fast you use the shears.
+  `ToolSwingSpeed`     | 1×      | How fast you swing your tools (except weapons & fishing rod).<br /><small>(Suggested value: 2×.)</small>
+  `WeaponSwingSpeed`   | 1×      | How fast you swing your weapons.<br /><small>(Suggested value: 4×.)</small>
 
   World animations:
 
@@ -63,4 +65,3 @@ Multiplayer notes:
 ## See also
 * [Release notes](release-notes.md)
 * [Nexus mod](http://www.nexusmods.com/stardewvalley/mods/1089/)
-* [Discussion thread](http://community.playstarbound.com/threads/smapi-fast-animations.132074/)

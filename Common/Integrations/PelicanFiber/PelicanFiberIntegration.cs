@@ -7,7 +7,7 @@ namespace Pathoschild.Stardew.Common.Integrations.PelicanFiber
     internal class PelicanFiberIntegration : BaseIntegration
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The full type name of the Pelican Fiber mod's build menu.</summary>
         private readonly string MenuTypeName = "PelicanFiber.Framework.ConstructionMenu";
@@ -24,7 +24,7 @@ namespace Pathoschild.Stardew.Common.Integrations.PelicanFiber
         /// <param name="reflection">An API for accessing private code.</param>
         /// <param name="monitor">Encapsulates monitoring and logging.</param>
         public PelicanFiberIntegration(IModRegistry modRegistry, IReflectionHelper reflection, IMonitor monitor)
-            : base("Pelican Fiber", "jwdred.PelicanFiber", "3.0.2", modRegistry, monitor)
+            : base("Pelican Fiber", "jwdred.PelicanFiber", "3.1.1-unofficial.7.1-pathoschild", modRegistry, monitor)
         {
             this.Reflection = reflection;
         }
@@ -43,7 +43,7 @@ namespace Pathoschild.Stardew.Common.Integrations.PelicanFiber
             if (!this.IsBuildMenuOpen())
                 return null;
 
-            return this.Reflection.GetProperty<BluePrint>(Game1.activeClickableMenu, "CurrentBlueprint").GetValue();
+            return this.Reflection.GetProperty<BluePrint>(Game1.activeClickableMenu, "currentBlueprint").GetValue();
         }
     }
 }

@@ -18,10 +18,13 @@ namespace Pathoschild.Stardew.ChestsAnywhere
     internal class ModEntry : Mod
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The mod configuration.</summary>
         private ModConfig Config;
+
+        /// <summary>The configured key bindings.</summary>
+        private ModConfigKeys Keys;
 
         /// <summary>The internal mod settings.</summary>
         private ModData Data;
@@ -36,8 +39,8 @@ namespace Pathoschild.Stardew.ChestsAnywhere
         /// <summary>The selected in-game inventory.</summary>
         private IList<Item> SelectedInventory;
 
-        /// <summary>The menu overlay which lets the player navigate and edit chests.</summary>
-        private ManageChestOverlay ManageChestOverlay;
+        /// <summary>The overlay for the current menu which which lets the player navigate and edit chests (or <c>null</c> if not applicable).</summary>
+        private IStorageOverlay CurrentOverlay;
 
 
         /*********
@@ -47,21 +50,18 @@ namespace Pathoschild.Stardew.ChestsAnywhere
         /// <param name="helper">Provides methods for interacting with the mod directory, such as read/writing a config file or custom JSON files.</param>
         public override void Entry(IModHelper helper)
         {
-            // initialise
+            // initialize
             this.Config = helper.ReadConfig<ModConfig>();
+            this.Keys = this.Config.Controls.ParseControls(this.Monitor);
             this.Data = helper.Data.ReadJsonFile<ModData>("data.json") ?? new ModData();
-            this.ChestFactory = new ChestFactory(helper.Translation, helper.Data, this.Config.EnableShippingBin);
+            this.ChestFactory = new ChestFactory(helper.Data, helper.Reflection, helper.Translation, this.Config.EnableShippingBin);
 
-            // hook UI
-            GraphicsEvents.OnPostRenderHudEvent += this.GraphicsEvents_OnPostRenderHudEvent;
-            MenuEvents.MenuChanged += this.MenuEvents_MenuChanged;
-            MenuEvents.MenuClosed += this.MenuEvents_MenuClosed;
-
-            // hook input
-            InputEvents.ButtonPressed += this.InputEvents_ButtonPressed;
-
-            // hook game events
-            SaveEvents.AfterLoad += this.SaveEvents_AfterLoad;
+            // hook events
+            helper.Events.GameLoop.SaveLoaded += this.OnSaveLoaded;
+            helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
+            helper.Events.GameLoop.UpdateTicking += this.OnUpdateTicking;
+            helper.Events.Display.RenderedHud += this.OnRenderedHud;
+            helper.Events.Input.ButtonPressed += this.OnButtonPressed;
 
             // validate translations
             if (!helper.Translation.GetTranslations().Any())
@@ -75,7 +75,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere
         /// <summary>The method invoked after the player loads a saved game.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void SaveEvents_AfterLoad(object sender, EventArgs e)
+        private void OnSaveLoaded(object sender, SaveLoadedEventArgs e)
         {
             // validate game version
             string versionError = this.ValidateGameVersion();
@@ -93,7 +93,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere
         /// <summary>The method invoked when the interface has finished rendering.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void GraphicsEvents_OnPostRenderHudEvent(object sender, EventArgs e)
+        private void OnRenderedHud(object sender, RenderedHudEventArgs e)
         {
             // show chest label
             if (this.Config.ShowHoverTooltips)
@@ -102,73 +102,38 @@ namespace Pathoschild.Stardew.ChestsAnywhere
                 if (cursorChest != null && !cursorChest.HasDefaultName())
                 {
                     Vector2 tooltipPosition = new Vector2(Game1.getMouseX(), Game1.getMouseY()) + new Vector2(Game1.tileSize / 2f);
-                    CommonHelper.DrawHoverBox(Game1.spriteBatch, cursorChest.DisplayName, tooltipPosition, Game1.viewport.Width - tooltipPosition.X - Game1.tileSize / 2f);
+                    CommonHelper.DrawHoverBox(e.SpriteBatch, cursorChest.DisplayName, tooltipPosition, Game1.viewport.Width - tooltipPosition.X - Game1.tileSize / 2f);
                 }
             }
         }
 
-        /// <summary>The method invoked when the active menu changes.</summary>
+        /// <summary>Raised before the game state is updated (≈60 times per second).</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
+        private void OnUpdateTicking(object sender, UpdateTickingEventArgs e)
         {
-            // remove overlay
-            if (e.PriorMenu is ItemGrabMenu)
-            {
-                this.ManageChestOverlay?.Dispose();
-                this.ManageChestOverlay = null;
-            }
-
-            // add overlay
-            if (e.NewMenu is ItemGrabMenu chestMenu)
-            {
-                // get open chest
-                ManagedChest chest = this.ChestFactory.GetChestFromMenu(chestMenu);
-                if (chest == null)
-                    return;
-
-                // reopen shipping box in standard chest UI if needed
-                // This is called in two cases:
-                // - When the player opens the shipping bin directly, it opens the shipping bin view instead of the full chest view.
-                // - When the player changes the items in the chest view, it reopens itself but loses the constructor args (e.g. highlight function).
-                if (this.Config.EnableShippingBin && chest.Container is ShippingBinContainer && (!chestMenu.showReceivingMenu || !(chestMenu.inventory.highlightMethod?.Target is ShippingBinContainer)))
-                {
-                    chestMenu = chest.OpenMenu();
-                    Game1.activeClickableMenu = chestMenu;
-                }
-
-                // add overlay
-                RangeHandler range = this.GetCurrentRange();
-                ManagedChest[] chests = this.ChestFactory.GetChests(range, excludeHidden: true, alwaysIncludeContainer: chest.Container).ToArray();
-                bool isAutomateInstalled = this.Helper.ModRegistry.IsLoaded("Pathoschild.Automate");
-                this.ManageChestOverlay = new ManageChestOverlay(chestMenu, chest, chests, this.Config, this.Helper.Input, this.Helper.Translation, showAutomateOptions: isAutomateInstalled && chest.CanConfigureAutomate);
-                this.ManageChestOverlay.OnChestSelected += selected =>
-                {
-                    this.SelectedInventory = selected.Container.Inventory;
-                    Game1.activeClickableMenu = selected.OpenMenu();
-                };
-            }
+            this.ChangeOverlayIfNeeded();
         }
 
-        /// <summary>The method invoked when a menu is closed.</summary>
+        /// <summary>Raised after the game state is updated (≈60 times per second).</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void MenuEvents_MenuClosed(object sender, EventArgsClickableMenuClosed e)
+        private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
-            this.MenuEvents_MenuChanged(sender, new EventArgsClickableMenuChanged(e.PriorMenu, null));
+            this.ChangeOverlayIfNeeded();
         }
 
         /// <summary>The method invoked when the player presses a button.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void InputEvents_ButtonPressed(object sender, EventArgsInput e)
+        private void OnButtonPressed(object sender, ButtonPressedEventArgs e)
         {
             try
             {
-                var controls = this.Config.Controls;
+                ModConfigKeys keys = this.Keys;
 
                 // open menu
-                if (controls.Toggle.Contains(e.Button))
+                if (keys.Toggle.Contains(e.Button))
                 {
                     // open if no conflict
                     if (Game1.activeClickableMenu == null)
@@ -177,7 +142,7 @@ namespace Pathoschild.Stardew.ChestsAnywhere
                     // open from inventory if it's safe to close the inventory screen
                     else if (Game1.activeClickableMenu is GameMenu gameMenu && gameMenu.currentTab == GameMenu.inventoryTab)
                     {
-                        IClickableMenu inventoryPage = this.Helper.Reflection.GetField<List<IClickableMenu>>(gameMenu, "pages").GetValue()[GameMenu.inventoryTab];
+                        IClickableMenu inventoryPage = gameMenu.pages[GameMenu.inventoryTab];
                         if (inventoryPage.readyToClose())
                             this.OpenMenu();
                     }
@@ -187,6 +152,62 @@ namespace Pathoschild.Stardew.ChestsAnywhere
             {
                 this.HandleError(ex, "handling key input");
             }
+        }
+
+        /// <summary>Change the chest UI overlay if needed to match the current menu.</summary>
+        /// <remarks>Since the menu gets reopened whenever the chest inventory changes, this method needs to be called before/after tick to avoid a visible UI flicker.</remarks>
+        private void ChangeOverlayIfNeeded()
+        {
+            IClickableMenu menu = Game1.activeClickableMenu;
+
+            // already matches menu
+            if (this.CurrentOverlay?.ForMenuInstance == menu)
+                return;
+
+            // remove old overlay
+            if (this.CurrentOverlay != null)
+            {
+                this.CurrentOverlay?.Dispose();
+                this.CurrentOverlay = null;
+            }
+
+            // get open chest
+            ManagedChest chest = this.ChestFactory.GetChestFromMenu(menu);
+            if (chest == null)
+                return;
+
+            // reopen shipping box in standard chest UI if needed
+            // This is called in two cases:
+            // - When the player opens the shipping bin directly, it opens the shipping bin view instead of the full chest view.
+            // - When the player changes the items in the chest view, it reopens itself but loses the constructor args (e.g. highlight function).
+            if (this.Config.EnableShippingBin && chest.Container is ShippingBinContainer)
+            {
+                if (menu is ItemGrabMenu chestMenu && (!chestMenu.showReceivingMenu || !(chestMenu.inventory.highlightMethod?.Target is ShippingBinContainer)))
+                {
+                    menu = (ItemGrabMenu)chest.OpenMenu();
+                    Game1.activeClickableMenu = menu;
+                }
+            }
+
+            // add overlay
+            RangeHandler range = this.GetCurrentRange();
+            ManagedChest[] chests = this.ChestFactory.GetChests(range, excludeHidden: true, alwaysIncludeContainer: chest.Container).ToArray();
+            bool isAutomateInstalled = this.Helper.ModRegistry.IsLoaded("Pathoschild.Automate");
+            switch (menu)
+            {
+                case ItemGrabMenu chestMenu:
+                    this.CurrentOverlay = new ChestOverlay(chestMenu, chest, chests, this.Config, this.Keys, this.Helper.Events, this.Helper.Input, this.Helper.Translation, showAutomateOptions: isAutomateInstalled && chest.CanConfigureAutomate);
+                    break;
+
+                case ShopMenu shopMenu:
+                    this.CurrentOverlay = new ShopMenuOverlay(shopMenu, chest, chests, this.Config, this.Keys, this.Helper.Events, this.Helper.Input, this.Helper.Translation, showAutomateOptions: isAutomateInstalled && chest.CanConfigureAutomate);
+                    break;
+            }
+            this.CurrentOverlay.OnChestSelected += selected =>
+            {
+                this.SelectedInventory = selected.Container.Inventory;
+                Game1.activeClickableMenu = selected.OpenMenu();
+            };
         }
 
         /// <summary>Open the menu UI.</summary>

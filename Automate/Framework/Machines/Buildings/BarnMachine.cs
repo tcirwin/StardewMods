@@ -14,29 +14,29 @@ using Netcode;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 {
-    internal class BarnMachine: IMachine
+    internal class BarnMachine: BaseMachine<Barn>
     {
         private readonly AnimalHouse AnimalHouse = null;
         protected List<FarmAnimal> UnprocessedAnimals;
         private int produceCount = 0;
 
-        public BarnMachine(Barn barn)
+        public BarnMachine(Barn barn, GameLocation location) : base(barn, location, BaseMachine.GetTileAreaFor(barn))
         {
             if (barn.indoors.Value is AnimalHouse)
                 this.AnimalHouse = (AnimalHouse)barn.indoors.Value;
-            
+
             this.UnprocessedAnimals = new List<FarmAnimal>();
             this.FindUnprocessedAnimals();
         }
 
-        public MachineState GetState()
+        public override MachineState GetState()
         {
             if (this.UnprocessedAnimals.Count > 0)
                 return MachineState.Done;
             return MachineState.Processing;
         }
 
-        public ITrackedStack GetOutput()
+        public override ITrackedStack GetOutput()
         {
             FarmAnimal animal = this.UnprocessedAnimals.FirstOrDefault();
             if (animal == null)
@@ -60,7 +60,7 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
             return new TrackedItem(produce);
         }
 
-        public bool SetInput(IStorage input)
+        public override bool SetInput(IStorage input)
         {
             return false; // no inputs
         }

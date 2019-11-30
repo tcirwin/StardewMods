@@ -20,7 +20,7 @@ namespace Pathoschild.Stardew.LookupAnything.Components
     internal class LookupMenu : IClickableMenu
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The subject metadata.</summary>
         private readonly ISubject Subject;
@@ -64,12 +64,11 @@ namespace Pathoschild.Stardew.LookupAnything.Components
         /// <summary>Click areas for link fields that open a new subject.</summary>
         private readonly IDictionary<ILinkField, Rectangle> LinkFieldAreas = new Dictionary<ILinkField, Rectangle>();
 
+        /// <summary>Whether the game HUD was enabled when the menu was opened.</summary>
+        private readonly bool WasHudEnabled;
 
-        /*********
-        ** Accessors
-        *********/
-        /// <summary>Whether the lookup is showing information for a tile.</summary>
-        public bool IsTileLookup { get; set; }
+        /// <summary>Whether to exit the menu on the next update tick.</summary>
+        private bool ExitOnNextTick;
 
 
         /*********
@@ -96,6 +95,7 @@ namespace Pathoschild.Stardew.LookupAnything.Components
             this.Reflection = reflectionHelper;
             this.ScrollAmount = scroll;
             this.ShowNewPage = showNewPage;
+            this.WasHudEnabled = Game1.displayHUD;
 
             // save debug fields
             if (showDebugFields)
@@ -116,6 +116,9 @@ namespace Pathoschild.Stardew.LookupAnything.Components
 
             // update layout
             this.UpdateLayout();
+
+            // hide game HUD
+            Game1.displayHUD = false;
         }
 
         /****
@@ -183,9 +186,26 @@ namespace Pathoschild.Stardew.LookupAnything.Components
             }
         }
 
+        /// <summary>Update the menu state if needed.</summary>
+        /// <param name="time">The elapsed game time.</param>
+        public override void update(GameTime time)
+        {
+            if (this.ExitOnNextTick && this.readyToClose())
+                this.exitThisMenu();
+            else
+                base.update(time);
+        }
+
         /****
         ** Methods
         ****/
+        /// <summary>Exit the menu at the next safe opportunity.</summary>
+        /// <remarks>This circumvents an issue where the game may freeze in some cases like the load selection screen when the menu is exited at an arbitrary time.</remarks>
+        public void QueueExit()
+        {
+            this.ExitOnNextTick = true;
+        }
+
         /// <summary>Scroll up the menu content by the specified amount (if possible).</summary>
         public void ScrollUp()
         {
@@ -285,89 +305,97 @@ namespace Pathoschild.Stardew.LookupAnything.Components
                 // (This uses a separate sprite batch to set a clipping area for scrolling.)
                 using (SpriteBatch contentBatch = new SpriteBatch(Game1.graphics.GraphicsDevice))
                 {
-                    // begin draw
                     GraphicsDevice device = Game1.graphics.GraphicsDevice;
-                    device.ScissorRectangle = new Rectangle(x + gutter, y + gutter, (int)contentWidth, (int)contentHeight);
-                    contentBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied, SamplerState.PointClamp, null, new RasterizerState { ScissorTestEnable = true });
-
-                    // scroll view
-                    this.CurrentScroll = Math.Max(0, this.CurrentScroll); // don't scroll past top
-                    this.CurrentScroll = Math.Min(this.MaxScroll, this.CurrentScroll); // don't scroll past bottom
-                    topOffset -= this.CurrentScroll; // scrolled down == move text up
-
-                    // draw portrait
-                    if (subject.DrawPortrait(contentBatch, new Vector2(x + leftOffset, y + topOffset), new Vector2(70, 70)))
-                        leftOffset += 72;
-
-                    // draw fields
-                    float wrapWidth = this.width - leftOffset - gutter;
+                    Rectangle prevScissorRectangle = device.ScissorRectangle;
+                    try
                     {
-                        // draw name & item type
-                        {
-                            Vector2 nameSize = contentBatch.DrawTextBlock(font, $"{subject.Name}.", new Vector2(x + leftOffset, y + topOffset), wrapWidth, bold: Constant.AllowBold);
-                            Vector2 typeSize = contentBatch.DrawTextBlock(font, $"{subject.Type}.", new Vector2(x + leftOffset + nameSize.X + spaceWidth, y + topOffset), wrapWidth);
-                            topOffset += Math.Max(nameSize.Y, typeSize.Y);
-                        }
+                        // begin draw
+                        device.ScissorRectangle = new Rectangle(x + gutter, y + gutter, (int)contentWidth, (int)contentHeight);
+                        contentBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied, SamplerState.PointClamp, null, new RasterizerState { ScissorTestEnable = true });
 
-                        // draw description
-                        if (subject.Description != null)
-                        {
-                            Vector2 size = contentBatch.DrawTextBlock(font, subject.Description?.Replace(Environment.NewLine, " "), new Vector2(x + leftOffset, y + topOffset), wrapWidth);
-                            topOffset += size.Y;
-                        }
+                        // scroll view
+                        this.CurrentScroll = Math.Max(0, this.CurrentScroll); // don't scroll past top
+                        this.CurrentScroll = Math.Min(this.MaxScroll, this.CurrentScroll); // don't scroll past bottom
+                        topOffset -= this.CurrentScroll; // scrolled down == move text up
 
-                        // draw spacer
-                        topOffset += lineHeight;
+                        // draw portrait
+                        if (subject.DrawPortrait(contentBatch, new Vector2(x + leftOffset, y + topOffset), new Vector2(70, 70)))
+                            leftOffset += 72;
 
-                        // draw custom fields
-                        if (this.Fields.Any())
+                        // draw fields
+                        float wrapWidth = this.width - leftOffset - gutter;
                         {
-                            ICustomField[] fields = this.Fields;
-                            float cellPadding = 3;
-                            float labelWidth = fields.Where(p => p.HasValue).Max(p => font.MeasureString(p.Label).X);
-                            float valueWidth = wrapWidth - labelWidth - cellPadding * 4 - tableBorderWidth;
-                            foreach (ICustomField field in fields)
+                            // draw name & item type
                             {
-                                if (!field.HasValue)
-                                    continue;
+                                Vector2 nameSize = contentBatch.DrawTextBlock(font, $"{subject.Name}.", new Vector2(x + leftOffset, y + topOffset), wrapWidth, bold: Constant.AllowBold);
+                                Vector2 typeSize = contentBatch.DrawTextBlock(font, $"{subject.Type}.", new Vector2(x + leftOffset + nameSize.X + spaceWidth, y + topOffset), wrapWidth);
+                                topOffset += Math.Max(nameSize.Y, typeSize.Y);
+                            }
 
-                                // draw label & value
-                                Vector2 labelSize = contentBatch.DrawTextBlock(font, field.Label, new Vector2(x + leftOffset + cellPadding, y + topOffset + cellPadding), wrapWidth);
-                                Vector2 valuePosition = new Vector2(x + leftOffset + labelWidth + cellPadding * 3, y + topOffset + cellPadding);
-                                Vector2 valueSize =
-                                    field.DrawValue(contentBatch, font, valuePosition, valueWidth)
-                                    ?? contentBatch.DrawTextBlock(font, field.Value, valuePosition, valueWidth);
-                                Vector2 rowSize = new Vector2(labelWidth + valueWidth + cellPadding * 4, Math.Max(labelSize.Y, valueSize.Y));
+                            // draw description
+                            if (subject.Description != null)
+                            {
+                                Vector2 size = contentBatch.DrawTextBlock(font, subject.Description?.Replace(Environment.NewLine, " "), new Vector2(x + leftOffset, y + topOffset), wrapWidth);
+                                topOffset += size.Y;
+                            }
 
-                                // draw table row
-                                Color lineColor = Color.Gray;
-                                contentBatch.DrawLine(x + leftOffset, y + topOffset, new Vector2(rowSize.X, tableBorderWidth), lineColor); // top
-                                contentBatch.DrawLine(x + leftOffset, y + topOffset + rowSize.Y, new Vector2(rowSize.X, tableBorderWidth), lineColor); // bottom
-                                contentBatch.DrawLine(x + leftOffset, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // left
-                                contentBatch.DrawLine(x + leftOffset + labelWidth + cellPadding * 2, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // middle
-                                contentBatch.DrawLine(x + leftOffset + rowSize.X, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // right
+                            // draw spacer
+                            topOffset += lineHeight;
 
-                                // track link area
-                                if (field is ILinkField linkField)
-                                    this.LinkFieldAreas[linkField] = new Rectangle((int)valuePosition.X, (int)valuePosition.Y, (int)valueSize.X, (int)valueSize.Y);
+                            // draw custom fields
+                            if (this.Fields.Any())
+                            {
+                                ICustomField[] fields = this.Fields;
+                                float cellPadding = 3;
+                                float labelWidth = fields.Where(p => p.HasValue).Max(p => font.MeasureString(p.Label).X);
+                                float valueWidth = wrapWidth - labelWidth - cellPadding * 4 - tableBorderWidth;
+                                foreach (ICustomField field in fields)
+                                {
+                                    if (!field.HasValue)
+                                        continue;
 
-                                // update offset
-                                topOffset += Math.Max(labelSize.Y, valueSize.Y);
+                                    // draw label & value
+                                    Vector2 labelSize = contentBatch.DrawTextBlock(font, field.Label, new Vector2(x + leftOffset + cellPadding, y + topOffset + cellPadding), wrapWidth);
+                                    Vector2 valuePosition = new Vector2(x + leftOffset + labelWidth + cellPadding * 3, y + topOffset + cellPadding);
+                                    Vector2 valueSize =
+                                        field.DrawValue(contentBatch, font, valuePosition, valueWidth)
+                                        ?? contentBatch.DrawTextBlock(font, field.Value, valuePosition, valueWidth);
+                                    Vector2 rowSize = new Vector2(labelWidth + valueWidth + cellPadding * 4, Math.Max(labelSize.Y, valueSize.Y));
+
+                                    // draw table row
+                                    Color lineColor = Color.Gray;
+                                    contentBatch.DrawLine(x + leftOffset, y + topOffset, new Vector2(rowSize.X, tableBorderWidth), lineColor); // top
+                                    contentBatch.DrawLine(x + leftOffset, y + topOffset + rowSize.Y, new Vector2(rowSize.X, tableBorderWidth), lineColor); // bottom
+                                    contentBatch.DrawLine(x + leftOffset, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // left
+                                    contentBatch.DrawLine(x + leftOffset + labelWidth + cellPadding * 2, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // middle
+                                    contentBatch.DrawLine(x + leftOffset + rowSize.X, y + topOffset, new Vector2(tableBorderWidth, rowSize.Y), lineColor); // right
+
+                                    // track link area
+                                    if (field is ILinkField linkField)
+                                        this.LinkFieldAreas[linkField] = new Rectangle((int)valuePosition.X, (int)valuePosition.Y, (int)valueSize.X, (int)valueSize.Y);
+
+                                    // update offset
+                                    topOffset += Math.Max(labelSize.Y, valueSize.Y);
+                                }
                             }
                         }
+
+                        // update max scroll
+                        this.MaxScroll = Math.Max(0, (int)(topOffset - contentHeight + this.CurrentScroll));
+
+                        // draw scroll icons
+                        if (this.MaxScroll > 0 && this.CurrentScroll > 0)
+                            this.ScrollUpButton.draw(contentBatch);
+                        if (this.MaxScroll > 0 && this.CurrentScroll < this.MaxScroll)
+                            this.ScrollDownButton.draw(spriteBatch);
+
+                        // end draw
+                        contentBatch.End();
                     }
-
-                    // update max scroll
-                    this.MaxScroll = Math.Max(0, (int)(topOffset - contentHeight + this.CurrentScroll));
-
-                    // draw scroll icons
-                    if (this.MaxScroll > 0 && this.CurrentScroll > 0)
-                        this.ScrollUpButton.draw(contentBatch);
-                    if (this.MaxScroll > 0 && this.CurrentScroll < this.MaxScroll)
-                        this.ScrollDownButton.draw(spriteBatch);
-
-                    // end draw
-                    contentBatch.End();
+                    finally
+                    {
+                        device.ScissorRectangle = prevScissorRectangle;
+                    }
                 }
 
                 // draw cursor
@@ -382,12 +410,21 @@ namespace Pathoschild.Stardew.LookupAnything.Components
         /// <summary>Update the layout dimensions based on the current game scale.</summary>
         private void UpdateLayout()
         {
+            // get viewport size
+            Point viewport = new Point(
+                x: Math.Min(Game1.viewport.Width, Game1.graphics.GraphicsDevice.Viewport.Width),
+                y: Math.Min(Game1.viewport.Height, Game1.graphics.GraphicsDevice.Viewport.Height)
+            );
+
             // update size
-            this.width = Math.Min(Game1.tileSize * 14, Game1.viewport.Width);
-            this.height = Math.Min((int)(this.AspectRatio.Y / this.AspectRatio.X * this.width), Game1.viewport.Height);
+            {
+                Point size = this.GetMenuSize(viewport.X, viewport.Y);
+                this.width = size.X;
+                this.height = size.Y;
+            }
 
             // update position
-            Vector2 origin = Utility.getTopLeftPositionForCenteringOnScreen(this.width, this.height);
+            Vector2 origin = new Vector2(viewport.X / 2 - this.width / 2, viewport.Y / 2 - this.height / 2); // derived from Utility.getTopLeftPositionForCenteringOnScreen, adjusted to account for possibly different GPU viewport size
             this.xPositionOnScreen = (int)origin.X;
             this.yPositionOnScreen = (int)origin.Y;
 
@@ -405,6 +442,23 @@ namespace Pathoschild.Stardew.LookupAnything.Components
         private void OnDrawError(Exception ex)
         {
             this.Monitor.InterceptErrors("handling an error in the lookup code", () => this.exitThisMenu());
+        }
+
+        /// <summary>Perform any cleanup needed when the menu exits.</summary>
+        protected override void cleanupBeforeExit()
+        {
+            Game1.displayHUD = this.WasHudEnabled;
+            base.cleanupBeforeExit();
+        }
+
+        /// <summary>Get the maximum width and height for the given viewport size.</summary>
+        /// <param name="viewportWidth">The viewport width.</param>
+        /// <param name="viewportHeight">The viewport height.</param>
+        private Point GetMenuSize(int viewportWidth, int viewportHeight)
+        {
+            int maxWidth = Math.Min(Game1.tileSize * 20, viewportWidth);
+            int maxHeight = Math.Min((int)(this.AspectRatio.Y / this.AspectRatio.X * maxWidth), viewportHeight);
+            return new Point(maxWidth, maxHeight);
         }
     }
 }

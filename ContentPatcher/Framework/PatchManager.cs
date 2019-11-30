@@ -5,9 +5,11 @@ using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.ConfigModels;
 using ContentPatcher.Framework.Patches;
 using ContentPatcher.Framework.Tokens;
+using ContentPatcher.Framework.Validators;
 using Microsoft.Xna.Framework.Graphics;
 using Pathoschild.Stardew.Common.Utilities;
 using StardewModdingAPI;
+using xTile;
 
 namespace ContentPatcher.Framework
 {
@@ -15,7 +17,7 @@ namespace ContentPatcher.Framework
     internal class PatchManager : IAssetLoader, IAssetEditor
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /****
         ** State
@@ -26,11 +28,17 @@ namespace ContentPatcher.Framework
         /// <summary>Encapsulates monitoring and logging.</summary>
         private readonly IMonitor Monitor;
 
+        /// <summary>Handle special validation logic on loaded or edited assets.</summary>
+        private readonly IAssetValidator[] AssetValidators;
+
         /// <summary>The patches which are permanently disabled for this session.</summary>
         private readonly IList<DisabledPatch> PermanentlyDisabledPatches = new List<DisabledPatch>();
 
         /// <summary>The patches to apply.</summary>
         private readonly HashSet<IPatch> Patches = new HashSet<IPatch>();
+
+        /// <summary>The patches to apply, indexed by token.</summary>
+        private readonly InvariantDictionary<HashSet<IPatch>> PatchesAffectedByToken = new InvariantDictionary<HashSet<IPatch>>();
 
         /// <summary>The patches to apply, indexed by asset name.</summary>
         private InvariantDictionary<HashSet<IPatch>> PatchesByCurrentTarget = new InvariantDictionary<HashSet<IPatch>>();
@@ -42,10 +50,12 @@ namespace ContentPatcher.Framework
         /// <summary>Construct an instance.</summary>
         /// <param name="monitor">Encapsulates monitoring and logging.</param>
         /// <param name="tokenManager">Manages the available contextual tokens.</param>
-        public PatchManager(IMonitor monitor, TokenManager tokenManager)
+        /// <param name="assetValidators">Handle special validation logic on loaded or edited assets.</param>
+        public PatchManager(IMonitor monitor, TokenManager tokenManager, IAssetValidator[] assetValidators)
         {
             this.Monitor = monitor;
             this.TokenManager = tokenManager;
+            this.AssetValidators = assetValidators;
         }
 
         /****
@@ -55,13 +65,22 @@ namespace ContentPatcher.Framework
         /// <param name="asset">Basic metadata about the asset being loaded.</param>
         public bool CanLoad<T>(IAssetInfo asset)
         {
+            // get load patches
             IPatch[] patches = this.GetCurrentLoaders(asset).ToArray();
+
+            // validate
             if (patches.Length > 1)
             {
                 this.Monitor.Log($"Multiple patches want to load {asset.AssetName} ({string.Join(", ", from entry in patches orderby entry.LogName select entry.LogName)}). None will be applied.", LogLevel.Error);
                 return false;
             }
+            if (patches.Length == 1 && !patches[0].FromAssetExists())
+            {
+                this.Monitor.Log($"Can't apply load \"{patches[0].LogName}\" to {patches[0].TargetAsset}: the {nameof(PatchConfig.FromFile)} file '{patches[0].FromAsset}' doesn't exist.", LogLevel.Warn);
+                return false;
+            }
 
+            // return result
             bool canLoad = patches.Any();
             this.Monitor.VerboseLog($"check: [{(canLoad ? "X" : " ")}] can load {asset.AssetName}");
             return canLoad;
@@ -95,6 +114,16 @@ namespace ContentPatcher.Framework
                 this.Monitor.Log($"{patch.ContentPack.Manifest.Name} loaded {asset.AssetName}.", LogLevel.Trace);
 
             T data = patch.Load<T>(asset);
+
+            foreach (IAssetValidator validator in this.AssetValidators)
+            {
+                if (!validator.TryValidate(asset, data, patch, out string error))
+                {
+                    this.Monitor.Log($"Can't apply patch {patch.LogName} to {asset.AssetName}: {error}.", LogLevel.Error);
+                    return default;
+                }
+            }
+
             patch.IsApplied = true;
             return data;
         }
@@ -130,63 +159,82 @@ namespace ContentPatcher.Framework
 
         /// <summary>Update the current context.</summary>
         /// <param name="contentHelper">The content helper through which to invalidate assets.</param>
-        public void UpdateContext(IContentHelper contentHelper)
+        /// <param name="globalChangedTokens">The global token values which changed, or <c>null</c> to update all tokens.</param>
+        public void UpdateContext(IContentHelper contentHelper, InvariantHashSet globalChangedTokens = null)
         {
             this.Monitor.VerboseLog("Propagating context...");
+
+            // collect patches to update
+            HashSet<IPatch> patches;
+            if (globalChangedTokens != null)
+            {
+                patches = new HashSet<IPatch>(new ObjectReferenceComparer<IPatch>());
+                foreach (string tokenName in globalChangedTokens)
+                {
+                    if (this.PatchesAffectedByToken.TryGetValue(tokenName, out HashSet<IPatch> affectedPatches))
+                    {
+                        foreach (IPatch patch in affectedPatches)
+                            patches.Add(patch);
+                    }
+                }
+            }
+            else
+                patches = this.Patches;
 
             // update patches
             InvariantHashSet reloadAssetNames = new InvariantHashSet();
             string prevAssetName = null;
-            foreach (IPatch patch in this.Patches.OrderByIgnoreCase(p => p.AssetName).ThenByIgnoreCase(p => p.LogName))
+            foreach (IPatch patch in patches.OrderByIgnoreCase(p => p.TargetAsset).ThenByIgnoreCase(p => p.LogName))
             {
                 // log asset name
-                if (this.Monitor.IsVerbose && prevAssetName != patch.AssetName)
+                if (this.Monitor.IsVerbose && prevAssetName != patch.TargetAsset)
                 {
-                    this.Monitor.VerboseLog($"   {patch.AssetName}:");
-                    prevAssetName = patch.AssetName;
+                    this.Monitor.VerboseLog($"   {patch.TargetAsset}:");
+                    prevAssetName = patch.TargetAsset;
                 }
 
                 // track old values
-                string wasAssetName = patch.AssetName;
-                bool wasApplied = patch.MatchesContext;
+                string wasAssetName = patch.TargetAsset;
+                bool wasReady = patch.IsReady;
 
                 // update patch
                 IContext tokenContext = this.TokenManager.TrackLocalTokens(patch.ContentPack.Pack);
                 bool changed = patch.UpdateContext(tokenContext);
-                bool shouldApply = patch.MatchesContext;
+                bool isReady = patch.IsReady;
 
                 // track patches to reload
-                bool reload = (wasApplied && changed) || (!wasApplied && shouldApply);
+                bool reload = (wasReady && changed) || (!wasReady && isReady);
                 if (reload)
                 {
                     patch.IsApplied = false;
-                    if (wasApplied)
+                    if (wasReady)
                         reloadAssetNames.Add(wasAssetName);
-                    if (shouldApply)
-                        reloadAssetNames.Add(patch.AssetName);
+                    if (isReady)
+                        reloadAssetNames.Add(patch.TargetAsset);
                 }
 
                 // log change
                 if (this.Monitor.IsVerbose)
                 {
                     IList<string> changes = new List<string>();
-                    if (wasApplied != shouldApply)
-                        changes.Add(shouldApply ? "enabled" : "disabled");
-                    if (wasAssetName != patch.AssetName)
-                        changes.Add($"target: {wasAssetName} => {patch.AssetName}");
+                    if (wasReady != isReady)
+                        changes.Add(isReady ? "enabled" : "disabled");
+                    if (wasAssetName != patch.TargetAsset)
+                        changes.Add($"target: {wasAssetName} => {patch.TargetAsset}");
                     string changesStr = string.Join(", ", changes);
 
-                    this.Monitor.VerboseLog($"      [{(shouldApply ? "X" : " ")}] {patch.LogName}: {(changes.Any() ? changesStr : "OK")}");
+                    this.Monitor.VerboseLog($"      [{(isReady ? "X" : " ")}] {patch.LogName}: {(changes.Any() ? changesStr : "OK")}");
                 }
 
                 // warn for invalid load patch
-                if (patch is LoadPatch loadPatch && patch.MatchesContext && !patch.ContentPack.FileExists(loadPatch.LocalAsset.Value))
-                    this.Monitor.Log($"Patch error: {patch.LogName} has a {nameof(PatchConfig.FromFile)} which matches non-existent file '{loadPatch.LocalAsset.Value}'.", LogLevel.Error);
+                // (Other patch types show an error when applied, but that's not possible for a load patch since we can't cleanly abort a load.)
+                if (patch is LoadPatch loadPatch && patch.IsReady && !patch.FromAssetExists())
+                    this.Monitor.Log($"Patch error: {patch.LogName} has a {nameof(PatchConfig.FromFile)} which matches non-existent file '{loadPatch.FromAsset}'.", LogLevel.Error);
             }
 
             // rebuild asset name lookup
             this.PatchesByCurrentTarget = new InvariantDictionary<HashSet<IPatch>>(
-                from patchGroup in this.Patches.GroupByIgnoreCase(p => p.AssetName)
+                from patchGroup in this.Patches.GroupByIgnoreCase(p => p.TargetAsset)
                 let key = patchGroup.Key
                 let value = new HashSet<IPatch>(patchGroup)
                 select new KeyValuePair<string, HashSet<IPatch>>(key, value)
@@ -211,19 +259,39 @@ namespace ContentPatcher.Framework
         /// <param name="patch">The patch to add.</param>
         public void Add(IPatch patch)
         {
+            ModTokenContext modContext = this.TokenManager.TrackLocalTokens(patch.ContentPack.Pack);
+
             // set initial context
-            IContext tokenContext = this.TokenManager.TrackLocalTokens(patch.ContentPack.Pack);
-            patch.UpdateContext(tokenContext);
+            patch.UpdateContext(modContext);
 
             // add to patch list
-            this.Monitor.VerboseLog($"      added {patch.Type} {patch.AssetName}.");
+            this.Monitor.VerboseLog($"      added {patch.Type} {patch.TargetAsset}.");
             this.Patches.Add(patch);
 
-            // add to lookup cache
-            if (this.PatchesByCurrentTarget.TryGetValue(patch.AssetName, out HashSet<IPatch> patches))
-                patches.Add(patch);
-            else
-                this.PatchesByCurrentTarget[patch.AssetName] = new HashSet<IPatch> { patch };
+            // add to target cache
+            if (!this.PatchesByCurrentTarget.TryGetValue(patch.TargetAsset, out HashSet<IPatch> patches))
+                this.PatchesByCurrentTarget[patch.TargetAsset] = patches = new HashSet<IPatch>(new ObjectReferenceComparer<IPatch>());
+            patches.Add(patch);
+
+            // add to token cache
+            InvariantHashSet tokensUsed = new InvariantHashSet(patch.GetTokensUsed());
+            foreach (string tokenName in tokensUsed)
+                this.TrackPatchAffectedByToken(patch, tokenName);
+            foreach (IToken token in this.TokenManager.GetTokens(enforceContext: false))
+            {
+                if (!tokensUsed.Contains(token.Name) && modContext.GetTokensAffectedBy(token.Name).Any(name => tokensUsed.Contains(name)))
+                    this.TrackPatchAffectedByToken(patch, token.Name);
+            }
+        }
+
+        /// <summary>Track that a given token may cause the patch to update.</summary>
+        /// <param name="patch">The affected patch.</param>
+        /// <param name="tokenName">The token name.</param>
+        private void TrackPatchAffectedByToken(IPatch patch, string tokenName)
+        {
+            if (!this.PatchesAffectedByToken.TryGetValue(tokenName, out HashSet<IPatch> affected))
+                this.PatchesAffectedByToken[tokenName] = affected = new HashSet<IPatch>(new ObjectReferenceComparer<IPatch>());
+            affected.Add(patch);
         }
 
         /// <summary>Add a patch that's permanently disabled for this session.</summary>
@@ -260,7 +328,7 @@ namespace ContentPatcher.Framework
         {
             return this
                 .GetPatches(asset.AssetName)
-                .Where(patch => patch.Type == PatchType.Load && patch.MatchesContext && patch.IsValidInContext);
+                .Where(patch => patch.Type == PatchType.Load && patch.IsReady);
         }
 
         /// <summary>Get patches which edit the given asset in the current context.</summary>
@@ -273,7 +341,7 @@ namespace ContentPatcher.Framework
 
             return this
                 .GetPatches(asset.AssetName)
-                .Where(patch => patch.Type == patchType && patch.MatchesContext);
+                .Where(patch => patch.Type == patchType && patch.IsReady);
         }
 
         /*********
@@ -285,10 +353,10 @@ namespace ContentPatcher.Framework
         {
             if (assetType == typeof(Texture2D))
                 return PatchType.EditImage;
-            if (assetType.IsGenericType && assetType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+            if (assetType == typeof(Map))
+                return PatchType.EditMap;
+            else
                 return PatchType.EditData;
-
-            return null;
         }
     }
 }

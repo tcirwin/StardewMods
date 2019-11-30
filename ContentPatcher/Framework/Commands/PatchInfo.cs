@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.Patches;
@@ -18,13 +19,13 @@ namespace ContentPatcher.Framework.Commands
         public string Type { get; }
 
         /// <summary>The asset name to intercept.</summary>
-        public string RawAssetName { get; }
+        public string RawTargetAsset { get; }
 
         /// <summary>The parsed asset name (if available).</summary>
-        public TokenString ParsedAssetName { get; }
+        public ITokenString ParsedTargetAsset { get; }
 
         /// <summary>The parsed conditions (if available).</summary>
-        public ConditionDictionary ParsedConditions { get; }
+        public Condition[] ParsedConditions { get; }
 
         /// <summary>The content pack which requested the patch.</summary>
         public ManagedContentPack ContentPack { get; }
@@ -38,11 +39,14 @@ namespace ContentPatcher.Framework.Commands
         /// <summary>Whether the patch is currently applied.</summary>
         public bool IsApplied { get; }
 
-        /// <summary>The reason this patch is disabled (if applicable).</summary>
-        public string ReasonDisabled { get; }
+        /// <summary>The patch context.</summary>
+        public IContext PatchContext { get; }
 
-        /// <summary>The tokens used by this patch in its fields.</summary>
-        public TokenName[] TokensUsed { get; }
+        /// <summary>Diagnostic info about the patch.</summary>
+        public IContextualState State { get; }
+
+        /// <summary>The underlying patch, if any.</summary>
+        public IPatch Patch { get; }
 
 
         /*********
@@ -54,15 +58,15 @@ namespace ContentPatcher.Framework.Commands
         {
             this.ShortName = this.GetShortName(patch.ContentPack, patch.LogName);
             this.Type = patch.Type;
-            this.RawAssetName = patch.AssetName;
-            this.ParsedAssetName = null;
+            this.RawTargetAsset = patch.AssetName;
+            this.ParsedTargetAsset = null;
             this.ParsedConditions = null;
             this.ContentPack = patch.ContentPack;
             this.IsLoaded = false;
             this.MatchesContext = false;
             this.IsApplied = false;
-            this.ReasonDisabled = patch.ReasonDisabled;
-            this.TokensUsed = new TokenName[0];
+            this.State = new ContextualState().AddErrors(patch.ReasonDisabled);
+            this.Patch = null;
         }
 
         /// <summary>Construct an instance.</summary>
@@ -71,14 +75,22 @@ namespace ContentPatcher.Framework.Commands
         {
             this.ShortName = this.GetShortName(patch.ContentPack, patch.LogName);
             this.Type = patch.Type.ToString();
-            this.RawAssetName = patch.TokenableAssetName.Raw;
-            this.ParsedAssetName = patch.TokenableAssetName;
+            this.RawTargetAsset = patch.RawTargetAsset.Raw;
+            this.ParsedTargetAsset = patch.RawTargetAsset;
             this.ParsedConditions = patch.Conditions;
             this.ContentPack = patch.ContentPack;
             this.IsLoaded = true;
-            this.MatchesContext = patch.MatchesContext;
+            this.MatchesContext = patch.IsReady;
             this.IsApplied = patch.IsApplied;
-            this.TokensUsed = patch.GetTokensUsed().ToArray();
+            this.PatchContext = patch.GetPatchContext();
+            this.State = patch.GetDiagnosticState();
+            this.Patch = patch;
+        }
+
+        /// <summary>Get a human-readable list of changes applied to the asset for display when troubleshooting.</summary>
+        public IEnumerable<string> GetChangeLabels()
+        {
+            return this.Patch?.GetChangeLabels() ?? Enumerable.Empty<string>();
         }
 
 

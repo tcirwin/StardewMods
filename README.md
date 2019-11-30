@@ -9,7 +9,7 @@ Active mods:
   machines with a chest to create factories._
 
 * **[Chests Anywhere](http://www.nexusmods.com/stardewvalley/mods/518)** <small>([source](ChestsAnywhere))</small>  
-  _Access your chests from anywhere and organise them your way. Transfer items without having to
+  _Access your chests from anywhere and organize them your way. Transfer items without having to
   run around, from the comfort of your bed to the deepest mine level._
 
 * **[Content Patcher](https://www.nexusmods.com/stardewvalley/mods/1915)** <small>([source](ContentPatcher))</small>  
@@ -17,10 +17,13 @@ Active mods:
   XNB mods, these content packs get automatic update checks and compatibility checks, are easy to
   install and uninstall, and are less likely to break due to game updates._
 
+* **[Crops Anytime Anywhere](https://www.nexusmods.com/stardewvalley/mods/3000)** <small>([source](CropsAnytimeAnywhere))</small>  
+  _Lets you grow crops in any season and location, including on grass/dirt tiles you normally
+  couldn't till._
+
 * **[Data Layers](https://www.nexusmods.com/stardewvalley/mods/1691)** <small>([source](DataLayers))</small>  
-  _Overlays the world with overlays the world with visual data like accessibility,
-  bee/Junimo/scarecrow/sprinkler coverage, etc. It automatically includes data from other mods if
-  applicable._
+  _Overlays the world with visual data like accessibility, bee/Junimo/scarecrow/sprinkler coverage,
+  etc. It automatically includes data from other mods if applicable._
 
 * **[Debug Mode](http://www.nexusmods.com/stardewvalley/mods/679)** <small>([source](DebugMode))</small>  
   _Press a button to view debug information and unlock the game's built-in debug commands
@@ -31,16 +34,20 @@ Active mods:
   breaking geodes). Optionally configure the speed for each animation._
 
 * **[Lookup Anything](http://www.nexusmods.com/stardewvalley/mods/541)** <small>([source](LookupAnything))</small>  
-  _See live info about whatever's under your cursor when you press F1. Learn a villager's favourite
+  _See live info about whatever's under your cursor when you press F1. Learn a villager's favorite
   gifts, when a crop will be ready to harvest, how long a fence will last, why your farm animals
   are unhappy, and more._
 
-* **[Rotate Toolbar](http://www.nexusmods.com/stardewvalley/mods/1100)** <small>([source](RotateToolbar))</small>  
-  _Rotate the top inventory row for the toolbar by pressing Tab (configurable)._
+* **Noclip Mode** <small>([source](NoclipMode))</small>  
+  _Toggle [noclip mode](https://en.wikipedia.org/wiki/Noclip_mode) at the press of a button,
+  letting you walk through anything (even map boundaries)._
 
 * **[Skip Intro](http://www.nexusmods.com/stardewvalley/mods/533)** <small>([source](SkipIntro))</small>  
   _Skip straight to the title screen or load screen (configurable) when you start the game. It also
   skips the screen transitions, so starting the game is much faster._
+
+* **[Small Beach Farm](http://www.nexusmods.com/stardewvalley/mods/3750)** <small>([source](SmallBeachFarm))</small>  
+  _Replaces the riverlands farm with a fertile pocket beach, suitable for slower or challenge runs._
 
 * **[Tractor Mod](http://www.nexusmods.com/stardewvalley/mods/1401)** <small>([source](TractorMod))</small>  
   _Lets you buy a tractor to more efficiently till/fertilize/seed/water/harvest crops, clear rocks, etc._
@@ -54,43 +61,33 @@ Inactive mods:
   _Disables collapsing. You just stay awake forever and the night never ends (until you go to bed).
   Broke permanently in Stardew Valley 1.3.20._
 
+* ~~[Rotate Toolbar](http://www.nexusmods.com/stardewvalley/mods/1100)~~ <small>([source](RotateToolbar))</small>  
+  _Rotate the top inventory row for the toolbar by pressing Tab (configurable). Added to the game
+  in Stardew Valley 1.4.0._
+
+
 ## Translating the mods
 The mods can be translated into any language supported by the game, and SMAPI will automatically
 use the right translations.
 
 (❑ = untranslated, ↻ = partly translated, ✓ = fully translated)
 
-&nbsp;     | Chests Anywhere                          | Data Layers                          | Debug Mode                          | Lookup Anything                          | Tractor Mod
----------- | :--------------------------------------- | :----------------------------------- | :---------------------------------- | :--------------------------------------- | :------------------------------
-Chinese    | [↻ partial](ChestsAnywhere/i18n/zh.json) | [↻ partial](DataLayers/i18n/zh.json) | [✓](DebugMode/i18n/zh.json)        | [↻ partial](LookupAnything/i18n/zh.json) | [✓](TractorMod/i18n/zh.json)
-German     | [✓](ChestsAnywhere/i18n/de.json)        | [✓](DataLayers/i18n/de.json)        | [✓](DebugMode/i18n/de.json)        | [✓](LookupAnything/i18n/de.json)        | [✓](TractorMod/i18n/de.json)
-Japanese   | [✓](ChestsAnywhere/i18n/ja.json)        | [✓](DataLayers/i18n/ja.json)        | [✓](DebugMode/i18n/ja.json)        | [↻ partial](LookupAnything/i18n/ja.json) | [✓](TractorMod/i18n/ja.json)
-Portuguese | [✓](ChestsAnywhere/i18n/pt.json)        | [✓](DataLayers/i18n/pt.json)        | [✓](DebugMode/i18n/pt.json)        | [↻ partial](LookupAnything/i18n/pt.json) | [✓](TractorMod/i18n/pt.json)
-Russian    | [↻ partial](ChestsAnywhere/i18n/ru.json) | [↻ partial](DataLayers/i18n/ru.json) | ↻ [partial](DebugMode/i18n/ru.json) | [↻ partial](LookupAnything/i18n/ru.json) | [✓](TractorMod/i18n/ru.json)
-Spanish    | [✓](ChestsAnywhere/i18n/es.json)        | [✓](DataLayers/i18n/es.json)        | [✓](DebugMode/i18n/es.json)        | [↻ partial](LookupAnything/i18n/es.json) | [✓](TractorMod/i18n/es.json)
+&nbsp;     | Chests Anywhere                          | Data Layers                          | Debug Mode                          | Lookup Anything                          | Noclip Mode                   | Tractor Mod
+---------- | :--------------------------------------- | :----------------------------------- | :---------------------------------- | :--------------------------------------- | :---------------------------- | :----------------------------
+Chinese    | [✓](ChestsAnywhere/i18n/zh.json)        | [✓](DataLayers/i18n/zh.json)        | [↻ partial](DebugMode/i18n/zh.json) | [↻ partial](LookupAnything/i18n/zh.json) | ❑                            | [✓](TractorMod/i18n/zh.json)
+French     | [↻ partial](ChestsAnywhere/i18n/fr.json) | [✓](DataLayers/i18n/fr.json)        | [✓](DebugMode/i18n/fr.json)        | [↻ partial](LookupAnything/i18n/fr.json) | ❑                            | [✓](TractorMod/i18n/fr.json)
+German     | [✓](ChestsAnywhere/i18n/de.json)        | [✓](DataLayers/i18n/de.json)        | [↻ partial](DebugMode/i18n/de.json) | [↻ partial](LookupAnything/i18n/de.json) | ❑                            | [✓](TractorMod/i18n/de.json)
+Hungarian  | ❑                                       | ❑                                   | ❑                                  | ❑                                       | ❑                            | ❑
+Italian    | ❑                                       | ❑                                   | [✓](DebugMode/i18n/it.json)        | ❑                                       | ❑                            | ❑
+Japanese   | [✓](ChestsAnywhere/i18n/ja.json)        | [✓](DataLayers/i18n/ja.json)        | [✓](DebugMode/i18n/ja.json)        | [↻ partial](LookupAnything/i18n/ja.json) | ❑                            | [✓](TractorMod/i18n/ja.json)
+Korean     | [✓](ChestsAnywhere/i18n/ko.json)        | [✓](DataLayers/i18n/ko.json)        | [↻ partial](DebugMode/i18n/ko.json) | [↻ partial](LookupAnything/i18n/ko.json) | ❑                            | [✓](TractorMod/i18n/ko.json)
+Portuguese | [✓](ChestsAnywhere/i18n/pt.json)        | [✓](DataLayers/i18n/pt.json)        | [↻ partial](DebugMode/i18n/pt.json) | [↻ partial](LookupAnything/i18n/pt.json) | ❑                            | [✓](TractorMod/i18n/pt.json)
+Russian    | [✓](ChestsAnywhere/i18n/ru.json)        | [✓](DataLayers/i18n/ru.json)        | [✓](DebugMode/i18n/ru.json)        | [↻ partial](LookupAnything/i18n/ru.json) | [✓](NoclipMode/i18n/ru.json) | [✓](TractorMod/i18n/ru.json)
+Spanish    | [✓](ChestsAnywhere/i18n/es.json)        | [↻ partial](DataLayers/i18n/es.json) | [↻ partial](DebugMode/i18n/es.json) | [↻ partial](LookupAnything/i18n/es.json) | ❑                            | [✓](TractorMod/i18n/es.json)
+Turkish    | [✓](ChestsAnywhere/i18n/tr.json)        | ❑                                   | ❑                                  | ❑                                       | ❑                            | [✓](TractorMod/i18n/tr.json)
 
-Here's how to translate one of my mods:
-
-1. Copy `default.json` into a new file with the right name:
-
-   language   | file name
-   ---------- | ---------
-   Chinese    | `zh.json`
-   German     | `de.json`
-   Japanese   | `ja.json`
-   Portuguese | `pt.json`
-   Spanish    | `es.json`
-
-2. Translate the second part on each line:
-   ```json
-   "example-key": "some text here"
-                   ^-- translate this
-   ```
-   Don't change the quote characters, and don't translate the text inside `{{these brackets}}`.
-3. Launch the game to try your translations.  
-   _You can edit translations without restarting the game; just type `reload_i18n` in the SMAPI console to reload the translation files._
-
-Create an issue or pull request here with your translations, or send them to me privately. :)
+Contributions are welcome! See [Modding:Translations](https://stardewvalleywiki.com/Modding:Translations)
+on the wiki for help contributing translations.
 
 ## Compiling the mods
 Installing stable releases from Nexus Mods is recommended for most users. If you really want to

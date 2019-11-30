@@ -1,18 +1,21 @@
+using Microsoft.Xna.Framework;
 using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A mushroom box that accepts input and provides output.</summary>
-    internal class MushroomBoxMachine : GenericMachine
+    internal class MushroomBoxMachine : GenericObjectMachine<SObject>
     {
         /*********
         ** Public methods
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public MushroomBoxMachine(SObject machine)
-            : base(machine) { }
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public MushroomBoxMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile) { }
 
         /// <summary>Get the machine's processing state.</summary>
         public override MachineState GetState()

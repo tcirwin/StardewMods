@@ -1,16 +1,17 @@
+using Microsoft.Xna.Framework;
 using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A coop incubator that accepts eggs and spawns chickens.</summary>
-    internal class CoopIncubatorMachine : GenericMachine
+    internal class CoopIncubatorMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes;
+        private readonly IRecipe[] Recipes;
 
 
         /*********
@@ -18,11 +19,13 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public CoopIncubatorMachine(SObject machine)
-            : base(machine)
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public CoopIncubatorMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile)
         {
             int minutesUntilReady = Game1.player.professions.Contains(2) ? 9000 : 18000;
-            this.Recipes = new[]
+            this.Recipes = new IRecipe[]
             {
                 // egg => chicken
                 new Recipe(

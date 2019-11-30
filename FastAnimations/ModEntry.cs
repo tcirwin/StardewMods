@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Pathoschild.Stardew.FastAnimations.Framework;
@@ -13,7 +12,7 @@ namespace Pathoschild.Stardew.FastAnimations
     internal class ModEntry : Mod
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The mod configuration.</summary>
         private ModConfig Config;
@@ -32,9 +31,9 @@ namespace Pathoschild.Stardew.FastAnimations
             this.Config = helper.ReadConfig<ModConfig>();
             this.Handlers = this.GetHandlers(this.Config).ToArray();
 
-            SaveEvents.AfterLoad += this.SaveEvents_AfterLoad;
-            GameEvents.UpdateTick += this.GameEvents_UpdateTick;
-            PlayerEvents.Warped += this.PlayerEvents_Warped;
+            helper.Events.GameLoop.SaveLoaded += this.OnSaveLoaded;
+            helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
+            helper.Events.Player.Warped += this.OnWarped;
         }
 
 
@@ -47,9 +46,9 @@ namespace Pathoschild.Stardew.FastAnimations
         /// <summary>The method invoked after the player loads a saved game.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void SaveEvents_AfterLoad(object sender, EventArgs e)
+        private void OnSaveLoaded(object sender, SaveLoadedEventArgs e)
         {
-            // initialise handlers
+            // initialize handlers
             foreach (IAnimationHandler handler in this.Handlers)
                 handler.OnNewLocation(Game1.currentLocation);
         }
@@ -57,9 +56,9 @@ namespace Pathoschild.Stardew.FastAnimations
         /// <summary>The method invoked after the player warps to a new location.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void PlayerEvents_Warped(object sender, EventArgsPlayerWarped e)
+        private void OnWarped(object sender, WarpedEventArgs e)
         {
-            if (!Context.IsWorldReady || Game1.eventUp || !this.Handlers.Any())
+            if (!Context.IsWorldReady || Game1.eventUp || !this.Handlers.Any() || !e.IsLocalPlayer)
                 return;
 
             foreach (IAnimationHandler handler in this.Handlers)
@@ -69,7 +68,7 @@ namespace Pathoschild.Stardew.FastAnimations
         /// <summary>The method invoked when the player presses a keyboard button.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event data.</param>
-        private void GameEvents_UpdateTick(object sender, EventArgs e)
+        private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
             if (Game1.eventUp || !this.Handlers.Any())
                 return;
@@ -100,6 +99,10 @@ namespace Pathoschild.Stardew.FastAnimations
                 yield return new MilkingHandler(config.MilkSpeed);
             if (config.ShearSpeed > 1)
                 yield return new ShearingHandler(config.ShearSpeed);
+            if (config.ToolSwingSpeed > 1)
+                yield return new ToolSwingHandler(config.ToolSwingSpeed);
+            if (config.WeaponSwingSpeed > 1)
+                yield return new WeaponSwingHandler(config.WeaponSwingSpeed);
 
             // world animations
             if (config.BreakGeodeSpeed > 1)

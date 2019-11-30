@@ -1,17 +1,18 @@
 using Microsoft.Xna.Framework;
+using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A keg that accepts input and provides output.</summary>
     /// <remarks>See the game's machine logic in <see cref="SObject.performObjectDropInAction"/> and <see cref="SObject.checkForAction"/>.</remarks>
-    internal class KegMachine : GenericMachine
+    internal class KegMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes =
+        private readonly IRecipe[] Recipes =
         {
             // honey => mead
             new Recipe(
@@ -29,6 +30,14 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
                 minutes: 120
             ),
 
+            // tea leaves => green tea
+            new Recipe(
+                input: 815,
+                inputCount: 1,
+                output: input => new Object(Vector2.Zero, 614, "Green Tea", false, true, false, false) { name = "Green Tea" },
+                minutes: 180
+            ),
+
             // wheat => beer
             new Recipe(
                 input: 262,
@@ -42,6 +51,19 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
                 input: 304,
                 inputCount: 1,
                 output: input => new SObject(Vector2.Zero, 303, "Pale Ale", false, true, false, false) { name = "Pale Ale" },
+                minutes: 2250
+            ),
+
+            // roe => caviar or aged roe
+            new Recipe(
+                input: 812,
+                inputCount: 1,
+                output: input =>
+                {
+                    if (input is SObject obj && obj.preservedParentSheetIndex.Value == 698) // sturgeon roe
+                        return new SObject(Vector2.Zero, 445, "Caviar", false, true, false, false) { name = "Caviar" };
+                    return new SObject(Vector2.Zero, 447, "Aged Roe", false, true, false, false) { name = "Aged Roe" };
+                },
                 minutes: 2250
             ),
 
@@ -86,8 +108,10 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public KegMachine(SObject machine)
-            : base(machine) { }
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public KegMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile) { }
 
         /// <summary>Provide input to the machine.</summary>
         /// <param name="input">The available items.</param>

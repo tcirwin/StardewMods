@@ -1,16 +1,17 @@
 using Microsoft.Xna.Framework;
+using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>An oil maker that accepts input and provides output.</summary>
-    internal class OilMakerMachine : GenericMachine
+    internal class OilMakerMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes =
+        private readonly IRecipe[] Recipes =
         {
             // truffle => truffle oil
             new Recipe(
@@ -51,8 +52,10 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public OilMakerMachine(SObject machine)
-            : base(machine) { }
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public OilMakerMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile) { }
 
         /// <summary>Provide input to the machine.</summary>
         /// <param name="input">The available items.</param>

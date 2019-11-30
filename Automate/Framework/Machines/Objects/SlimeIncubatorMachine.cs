@@ -1,16 +1,17 @@
+using Microsoft.Xna.Framework;
 using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A slime incubator that accepts slime eggs and spawns slime monsters.</summary>
-    internal class SlimeIncubatorMachine : GenericMachine
+    internal class SlimeIncubatorMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes;
+        private readonly IRecipe[] Recipes;
 
 
         /*********
@@ -18,11 +19,13 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public SlimeIncubatorMachine(SObject machine)
-            : base(machine)
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public SlimeIncubatorMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile)
         {
             int minutesUntilReady = Game1.player.professions.Contains(2) ? 2000 : 4000;
-            this.Recipes = new[] {
+            this.Recipes = new IRecipe[] {
                 // blue slime egg => object with parentSheetIndex of blue slime egg
                 new Recipe(
                     input: 413,

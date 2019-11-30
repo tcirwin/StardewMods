@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Pathoschild.Stardew.Common;
 using Pathoschild.Stardew.Common.UI;
 using StardewModdingAPI;
+using StardewModdingAPI.Events;
 using StardewValley;
 
 namespace ContentPatcher.Framework
@@ -14,7 +15,7 @@ namespace ContentPatcher.Framework
     internal class DebugOverlay : BaseOverlay
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The size of the margin around the displayed legend.</summary>
         private readonly int Margin = 30;
@@ -39,8 +40,11 @@ namespace ContentPatcher.Framework
         ** Public methods
         *********/
         /// <summary>Construct an instance.</summary>
+        /// <param name="events">The SMAPI events available for mods.</param>
+        /// <param name="inputHelper">An API for checking and changing input state.</param>
         /// <param name="contentHelper">The content helper from which to read textures.</param>
-        public DebugOverlay(IContentHelper contentHelper)
+        public DebugOverlay(IModEvents events, IInputHelper inputHelper, IContentHelper contentHelper)
+            : base(events, inputHelper)
         {
             this.Content = contentHelper;
             this.TextureNames = this.GetTextureNames(contentHelper).OrderByIgnoreCase(p => p).ToArray();

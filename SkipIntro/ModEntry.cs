@@ -13,7 +13,7 @@ namespace Pathoschild.Stardew.SkipIntro
     internal class ModEntry : Mod
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The mod configuration.</summary>
         private ModConfig Config;
@@ -34,8 +34,8 @@ namespace Pathoschild.Stardew.SkipIntro
         {
             this.Config = helper.ReadConfig<ModConfig>();
 
-            MenuEvents.MenuChanged += this.MenuEvents_MenuChanged;
-            GameEvents.UpdateTick += this.GameEvents_UpdateTick;
+            helper.Events.Display.MenuChanged += this.OnMenuChanged;
+            helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
         }
 
 
@@ -48,7 +48,7 @@ namespace Pathoschild.Stardew.SkipIntro
         /// <summary>The method called when the player returns to the title screen.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void MenuEvents_MenuChanged(object sender, EventArgsClickableMenuChanged e)
+        private void OnMenuChanged(object sender, MenuChangedEventArgs e)
         {
             if (e.NewMenu is TitleMenu)
                 this.CurrentStage = Stage.SkipIntro;
@@ -57,7 +57,7 @@ namespace Pathoschild.Stardew.SkipIntro
         /// <summary>Receives an update tick.</summary>
         /// <param name="sender">The event sender.</param>
         /// <param name="e">The event arguments.</param>
-        private void GameEvents_UpdateTick(object sender, EventArgs e)
+        private void OnUpdateTicked(object sender, UpdateTickedEventArgs e)
         {
             try
             {
@@ -79,7 +79,7 @@ namespace Pathoschild.Stardew.SkipIntro
             catch (Exception ex)
             {
                 this.Monitor.InterceptError(ex, "skipping the intro");
-                GameEvents.UpdateTick -= this.GameEvents_UpdateTick;
+                this.Helper.Events.GameLoop.UpdateTicked -= this.OnUpdateTicked;
             }
         }
 
@@ -107,13 +107,14 @@ namespace Pathoschild.Stardew.SkipIntro
                 menu.receiveKeyPress(Keys.Escape);
                 menu.update(Game1.currentGameTime);
 
-                // skip to other screen
+                // skip button transition
+                while (this.Helper.Reflection.GetField<int>(menu, "buttonsToShow").GetValue() < TitleMenu.numberOfButtons)
+                    menu.update(Game1.currentGameTime);
+
+                // skip to next screen
                 switch (this.Config.SkipTo)
                 {
                     case Screen.Title:
-                        // skip button transition
-                        while (this.Helper.Reflection.GetField<int>(menu, "buttonsToShow").GetValue() < TitleMenu.numberOfButtons)
-                            menu.update(Game1.currentGameTime);
                         return Stage.None;
 
                     case Screen.Load:

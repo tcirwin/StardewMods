@@ -1,16 +1,18 @@
 using Microsoft.Xna.Framework;
+using StardewValley;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
 {
     /// <summary>A loom that accepts input and provides output.</summary>
-    internal class LoomMachine : GenericMachine
+    /// <remarks>Derived from <see cref="SObject.performObjectDropInAction"/>.</remarks>
+    internal class LoomMachine : GenericObjectMachine<SObject>
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The recipes to process.</summary>
-        private readonly Recipe[] Recipes =
+        private readonly IRecipe[] Recipes =
         {
             // wool => cloth
             new Recipe(
@@ -27,8 +29,10 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="machine">The underlying machine.</param>
-        public LoomMachine(SObject machine)
-            : base(machine) { }
+        /// <param name="location">The location containing the machine.</param>
+        /// <param name="tile">The tile covered by the machine.</param>
+        public LoomMachine(SObject machine, GameLocation location, Vector2 tile)
+            : base(machine, location, tile) { }
 
         /// <summary>Get the output item.</summary>
         public override ITrackedStack GetOutput()
@@ -47,7 +51,47 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Objects
         /// <returns>Returns whether the machine started processing an item.</returns>
         public override bool SetInput(IStorage input)
         {
-            return this.GenericPullRecipe(input, this.Recipes);
+            if (input.TryGetIngredient(this.Recipes, out IConsumable consumable, out IRecipe recipe))
+            {
+                // get output
+                var inputStack = consumable.Take();
+                SObject output = recipe.Output(inputStack);
+                if (consumable.Sample is SObject sampleInput)
+                {
+                    if (Game1.random.NextDouble() <= this.GetProbabilityOfDoubleOutput(sampleInput.Quality))
+                        output.Stack = 2;
+                }
+
+                this.Machine.heldObject.Value = output;
+                this.Machine.MinutesUntilReady = recipe.Minutes(inputStack);
+                return true;
+            }
+
+            return false;
+        }
+
+
+        /*********
+        ** Private methods
+        *********/
+        /// <summary>Get the probability that the cheese press outputs two items for a given input quality.</summary>
+        /// <param name="quality">The input quality.</param>
+        private float GetProbabilityOfDoubleOutput(int quality)
+        {
+            switch (quality)
+            {
+                case SObject.lowQuality:
+                    return 0;
+
+                case SObject.highQuality:
+                    return 0.25f;
+
+                case SObject.bestQuality:
+                    return 0.5f;
+
+                default:
+                    return 0.1f;
+            }
         }
     }
 }

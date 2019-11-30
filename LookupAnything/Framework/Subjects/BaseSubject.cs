@@ -4,9 +4,11 @@ using System.Linq;
 using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Pathoschild.Stardew.LookupAnything.Framework.Constants;
 using Pathoschild.Stardew.LookupAnything.Framework.DebugFields;
 using Pathoschild.Stardew.LookupAnything.Framework.Fields;
 using StardewModdingAPI;
+using StardewModdingAPI.Utilities;
 
 namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
 {
@@ -14,7 +16,7 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
     internal abstract class BaseSubject : ISubject
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>Provides translations stored in the mod folder.</summary>
         protected ITranslationHelper Text { get; }
@@ -76,14 +78,14 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
         protected BaseSubject(GameHelper gameHelper, string name, string description, string type, ITranslationHelper translations)
             : this(gameHelper, translations)
         {
-            this.Initialise(name, description, type);
+            this.Initialize(name, description, type);
         }
 
-        /// <summary>Initialise the base values.</summary>
+        /// <summary>Initialize the base values.</summary>
         /// <param name="name">The display name.</param>
         /// <param name="description">The object description (if applicable).</param>
         /// <param name="type">The object type.</param>
-        protected void Initialise(string name, string description, string type)
+        protected void Initialize(string name, string description, string type)
         {
             this.Name = name;
             this.Description = description;
@@ -99,21 +101,32 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
 
             for (Type type = obj.GetType(); type != null; type = type.BaseType)
             {
+                // get fields & properties
                 var fields =
                     (
                         from field in type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy)
                         where !field.IsLiteral // exclude constants
-                        select new { field.Name, Value = this.GetDebugValue(obj, field) }
+                        select new { field.Name, Type = field.FieldType, Value = this.GetDebugValue(obj, field) }
                     )
                     .Concat(
                         from property in type.GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.FlattenHierarchy)
                         where property.CanRead
-                        select new { property.Name, Value = this.GetDebugValue(obj, property) }
+                        select new { property.Name, Type = property.PropertyType, Value = this.GetDebugValue(obj, property) }
                     )
                     .OrderBy(field => field.Name, StringComparer.InvariantCultureIgnoreCase);
 
+                // yield valid values
+                IDictionary<string, string> seenValues = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
                 foreach (var field in fields)
+                {
+                    if (seenValues.TryGetValue(field.Name, out string value) && value == field.Value)
+                        continue; // key/value pair differs only in the key case
+                    if (field.Value == field.Type.ToString())
+                        continue; // can't be displayed
+
+                    seenValues[field.Name] = field.Value;
                     yield return new GenericDebugField($"{type.Name}::{field.Name}", field.Value);
+                }
             }
         }
 
@@ -124,13 +137,33 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
             return this.Text.Stringify(value);
         }
 
-        /// <summary>Get a translation for the current locale.</summary>
-        /// <param name="key">The translation key.</param>
-        /// <param name="tokens">An anonymous object containing token key/value pairs, like <c>new { value = 42, name = "Cranberries" }</c>.</param>
-        /// <exception cref="KeyNotFoundException">The <paramref name="key" /> doesn't match an available translation.</exception>
-        protected Translation Translate(string key, object tokens = null)
+        /// <summary>Get a relative date value like 'tomorrow' or 'in 5 days'.</summary>
+        /// <param name="date">The date to represent.</param>
+        protected string GetRelativeDateStr(SDate date)
         {
-            return this.Text.Get(key, tokens);
+            return this.GetRelativeDateStr(date.DaysSinceStart - SDate.Now().DaysSinceStart);
+        }
+
+        /// <summary>Get a relative date value like 'tomorrow' or 'in 5 days'.</summary>
+        /// <param name="days">The day offset.</param>
+        protected string GetRelativeDateStr(int days)
+        {
+            switch (days)
+            {
+                case -1:
+                    return L10n.Generic.Yesterday();
+
+                case 0:
+                    return L10n.Generic.Now();
+
+                case 1:
+                    return L10n.Generic.Tomorrow();
+
+                default:
+                    if (days > 0)
+                        return L10n.Generic.InXDays(count: days);
+                    return L10n.Generic.XDaysAgo(count: -days);
+            }
         }
 
         /// <summary>Get a human-readable value for a debug value.</summary>

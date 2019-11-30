@@ -9,11 +9,10 @@ using StardewValley.Network;
 
 namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 {
-    internal class CoopMachine: IMachine
+    internal class CoopMachine: BaseMachine<Coop>
     {
         private static readonly KeyValuePair<Vector2, SObject> EmptyValue =
             new KeyValuePair<Vector2, SObject>(Vector2.Zero, new SObject());
-        private readonly Coop Coop;
 
         private readonly List<string> Products = new List<string>
         {
@@ -29,12 +28,10 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
 
         private KeyValuePair<Vector2, SObject> NextOutputProduct = EmptyValue;
 
-        public CoopMachine(Coop coop)
-        {
-            this.Coop = coop;
-        }
+        public CoopMachine(Coop coop, GameLocation location)
+            : base(coop, location, BaseMachine.GetTileAreaFor(coop)) { }
 
-        public MachineState GetState()
+        public override MachineState GetState()
         {
             this.ProcessFloorItems();
             if (!this.NextOutputProduct.Equals(EmptyValue))
@@ -42,21 +39,21 @@ namespace Pathoschild.Stardew.Automate.Framework.Machines.Buildings
             return MachineState.Processing;
         }
 
-        public ITrackedStack GetOutput()
+        public override ITrackedStack GetOutput()
         {
-            void emptyAction(Item _) => this.Coop.indoors.Value.removeObject(this.NextOutputProduct.Key, false);
+            void emptyAction(Item _) => this.Machine.indoors.Value.removeObject(this.NextOutputProduct.Key, false);
 
             return new TrackedItem(this.NextOutputProduct.Value, emptyAction);
         }
 
-        public bool SetInput(IStorage input)
+        public override bool SetInput(IStorage input)
         {
             return false; // no inputs
         }
 
         private void ProcessFloorItems()
         {
-            Dictionary<Vector2, SObject> floorItems = this.Coop.indoors.Value.objects.FirstOrDefault();
+            Dictionary<Vector2, SObject> floorItems = this.Machine.indoors.Value.objects.FirstOrDefault();
 
             foreach (var floorItem in floorItems)
             {

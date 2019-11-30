@@ -17,7 +17,6 @@ using StardewValley.Buildings;
 using StardewValley.Characters;
 using StardewValley.Locations;
 using StardewValley.Menus;
-using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod
 {
@@ -25,7 +24,7 @@ namespace Pathoschild.Stardew.TractorMod
     internal class ModEntry : Mod, IAssetLoader
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /****
         ** Constants
@@ -39,6 +38,9 @@ namespace Pathoschild.Stardew.TractorMod
         /// <summary>The update rate when multiple players are in the same location (as a frame multiple). This should be more frequent due to sprite broadcasts, new horses instances being created during NetRef&lt;Horse&gt; syncs, etc.</summary>
         private readonly uint TextureUpdateRateWithMultiplePlayers = 3;
 
+        /// <summary>The full type name for the Farm Expansion's construction menu.</summary>
+        private readonly string FarmExpansionMenuFullName = "FarmExpansion.Menus.FECarpenterMenu";
+
         /// <summary>The full type name for the Pelican Fiber mod's construction menu.</summary>
         private readonly string PelicanFiberMenuFullName = "PelicanFiber.Framework.ConstructionMenu";
 
@@ -48,11 +50,20 @@ namespace Pathoschild.Stardew.TractorMod
         /// <summary>The minimum version the host must have for the mod to be enabled on a farmhand.</summary>
         private readonly string MinHostVersion = "4.7-alpha.2";
 
+        /// <summary>A request from a farmhand to warp a tractor to the given player.</summary>
+        private readonly string RequestTractorMessageID = "TractorRequest";
+
+        /// <summary>The absolute path to legacy mod data for the current save.</summary>
+        private string LegacySaveDataRelativePath => Path.Combine("data", $"{Constants.SaveFolderName}.json");
+
         /****
         ** State
         ****/
         /// <summary>The mod settings.</summary>
         private ModConfig Config;
+
+        /// <summary>The configured key bindings.</summary>
+        private ModConfigKeys Keys;
 
         /// <summary>The tractor being ridden by the current player.</summary>
         private TractorManager TractorManager;
@@ -76,24 +87,30 @@ namespace Pathoschild.Stardew.TractorMod
         {
             // read config
             this.Config = helper.ReadConfig<ModConfig>();
+            this.Keys = this.Config.Controls.ParseControls(this.Monitor);
 
             // init tractor logic
-            StandardAttachmentsConfig attachmentConfig = this.Config.StandardAttachments;
-            this.TractorManager = new TractorManager(this.Config, this.Helper.Translation, this.Helper.Reflection, attachments: new IAttachment[]
             {
-                new CustomAttachment(this.Config.CustomAttachments), // should be first so it can override default attachments
-                new AxeAttachment(attachmentConfig.Axe),
-                new FertilizerAttachment(attachmentConfig.Fertilizer),
-                new GrassStarterAttachment(attachmentConfig.GrassStarter),
-                new HoeAttachment(attachmentConfig.Hoe),
-                new MeleeWeaponAttachment(attachmentConfig.MeleeWeapon),
-                new PickaxeAttachment(attachmentConfig.PickAxe),
-                new ScytheAttachment(attachmentConfig.Scythe),
-                new SeedAttachment(attachmentConfig.Seeds),
-                new SeedBagAttachment(attachmentConfig.SeedBagMod),
-                new SlingshotAttachment(attachmentConfig.Slingshot, this.Helper.Reflection),
-                new WateringCanAttachment(attachmentConfig.WateringCan)
-            });
+                IReflectionHelper reflection = this.Helper.Reflection;
+                StandardAttachmentsConfig toolConfig = this.Config.StandardAttachments;
+                this.TractorManager = new TractorManager(this.Config, this.Keys, this.Helper.Translation, this.Helper.Reflection, attachments: new IAttachment[]
+                {
+                    new CustomAttachment(this.Config.CustomAttachments, reflection), // should be first so it can override default attachments
+                    new AxeAttachment(toolConfig.Axe, reflection),
+                    new FertilizerAttachment(toolConfig.Fertilizer, reflection),
+                    new GrassStarterAttachment(toolConfig.GrassStarter, reflection),
+                    new HoeAttachment(toolConfig.Hoe, reflection),
+                    new MeleeWeaponAttachment(toolConfig.MeleeWeapon, reflection),
+                    new MilkPailAttachment(toolConfig.MilkPail, reflection),
+                    new PickaxeAttachment(toolConfig.PickAxe, reflection),
+                    new ScytheAttachment(toolConfig.Scythe, reflection),
+                    new SeedAttachment(toolConfig.Seeds, reflection),
+                    new SeedBagAttachment(toolConfig.SeedBagMod, reflection),
+                    new ShearsAttachment(toolConfig.Shears, reflection),
+                    new SlingshotAttachment(toolConfig.Slingshot, reflection),
+                    new WateringCanAttachment(toolConfig.WateringCan, reflection)
+                });
+            }
 
             // hook events
             IModEvents events = helper.Events;
@@ -106,7 +123,10 @@ namespace Pathoschild.Stardew.TractorMod
                 events.Display.Rendered += this.OnRendered;
             events.Display.MenuChanged += this.OnMenuChanged;
             events.Input.ButtonPressed += this.OnButtonPressed;
+            events.World.NpcListChanged += this.OnNpcListChanged;
+            events.World.LocationListChanged += this.OnLocationListChanged;
             events.GameLoop.UpdateTicked += this.OnUpdateTicked;
+            events.Multiplayer.ModMessageReceived += this.OnModMessageReceived;
 
             // validate translations
             if (!helper.Translation.GetTranslations().Any())
@@ -117,7 +137,7 @@ namespace Pathoschild.Stardew.TractorMod
         /// <param name="asset">Basic metadata about the asset being loaded.</param>
         public bool CanLoad<T>(IAssetInfo asset)
         {
-            // Allow for garages from older versions that didn't get normalised correctly.
+            // Allow for garages from older versions that didn't get normalized correctly.
             // This can be removed once support for legacy data is dropped.
             return asset.AssetNameEquals($"Buildings/{this.BlueprintBuildingType}");
         }
@@ -200,19 +220,67 @@ namespace Pathoschild.Stardew.TractorMod
                     {
                         // spawn new tractor if needed
                         Horse tractor = this.FindHorse(garage.HorseId);
-                        if (tractor == null && !garage.isUnderConstruction())
+                        if (!garage.isUnderConstruction())
                         {
-                            tractor = new Horse(garage.HorseId, garage.tileX.Value + 1, garage.tileY.Value + 1);
-                            location.addCharacter(tractor);
+                            Vector2 tractorTile = this.GetDefaultTractorTile(garage);
+                            if (tractor == null)
+                            {
+                                tractor = new Horse(garage.HorseId, (int)tractorTile.X, (int)tractorTile.Y);
+                                location.addCharacter(tractor);
+                            }
+                            tractor.DefaultPosition = tractorTile;
                         }
 
-                        // normalise tractor
+                        // normalize tractor
                         if (tractor != null)
                             tractor.Name = TractorManager.GetTractorName(garage.HorseId);
 
                         // apply textures
                         this.ApplyTextures(garage);
                         this.ApplyTextures(tractor);
+                    }
+                }
+            }
+        }
+
+        /// <summary>The event called after the location list changes.</summary>
+        /// <param name="sender">The event sender.</param>
+        /// <param name="e">The event arguments.</param>
+        private void OnLocationListChanged(object sender, LocationListChangedEventArgs e)
+        {
+            if (!this.IsEnabled)
+                return;
+
+            // rescue lost tractors
+            if (Context.IsMainPlayer)
+            {
+                foreach (GameLocation location in e.Removed)
+                {
+                    foreach (Horse tractor in this.GetTractorsIn(location).ToArray())
+                        this.DismissTractor(tractor);
+                }
+            }
+        }
+
+        /// <summary>The event called after the list of NPCs in a location changes.</summary>
+        /// <param name="sender">The event sender.</param>
+        /// <param name="e">The event arguments.</param>
+        private void OnNpcListChanged(object sender, NpcListChangedEventArgs e)
+        {
+            if (!this.IsEnabled)
+                return;
+
+            // workaround for instantly-built tractors spawning a horse
+            if (Context.IsMainPlayer && e.Location is BuildableGameLocation buildableLocation)
+            {
+                Horse[] horses = e.Added.OfType<Horse>().ToArray();
+                if (horses.Any())
+                {
+                    HashSet<Guid> tractorIDs = new HashSet<Guid>(this.GetGaragesIn(buildableLocation).Select(p => p.HorseId));
+                    foreach (Horse horse in horses)
+                    {
+                        if (tractorIDs.Contains(horse.HorseId) && !TractorManager.IsTractor(horse))
+                            horse.Name = TractorManager.GetTractorName(horse.HorseId);
                     }
                 }
             }
@@ -227,7 +295,7 @@ namespace Pathoschild.Stardew.TractorMod
                 return;
 
             // multiplayer: override textures in the current location
-            if (Context.IsWorldReady && Context.IsMultiplayer && Game1.currentLocation != null)
+            if (Context.IsWorldReady && Game1.currentLocation != null)
             {
                 uint updateRate = Game1.currentLocation.farmers.Count > 1 ? this.TextureUpdateRateWithMultiplePlayers : this.TextureUpdateRateWithSinglePlayer;
                 if (e.IsMultipleOf(updateRate))
@@ -302,7 +370,7 @@ namespace Pathoschild.Stardew.TractorMod
             if (Context.IsMainPlayer)
             {
                 // remove legacy file (pre-4.6)
-                FileInfo legacyFile = new FileInfo($"data/{Constants.SaveFolderName}.json");
+                FileInfo legacyFile = new FileInfo(Path.Combine(this.Helper.DirectoryPath, this.LegacySaveDataRelativePath));
                 if (legacyFile.Exists)
                     legacyFile.Delete();
 
@@ -329,28 +397,30 @@ namespace Pathoschild.Stardew.TractorMod
         /// <param name="e">The event arguments.</param>
         private void OnMenuChanged(object sender, MenuChangedEventArgs e)
         {
-            if (!this.IsEnabled)
+            if (!this.IsEnabled || !Context.IsWorldReady)
                 return;
 
-            // add blueprint to carpenter menu
-            if (Context.IsWorldReady && e.NewMenu != null)
+            // add blueprints
+            if (e.NewMenu is CarpenterMenu || e.NewMenu?.GetType().FullName == this.PelicanFiberMenuFullName)
             {
-                // default menu
-                if (e.NewMenu is CarpenterMenu)
-                {
-                    this.Helper.Reflection
-                        .GetField<List<BluePrint>>(e.NewMenu, "blueprints")
-                        .GetValue()
-                        .Add(this.GetBlueprint());
-                }
+                // get field
+                IList<BluePrint> blueprints = this.Helper.Reflection
+                    .GetField<List<BluePrint>>(e.NewMenu, "blueprints")
+                    .GetValue();
 
-                // modded menus
-                else if (e.NewMenu.GetType().FullName == this.PelicanFiberMenuFullName)
+                // add garage blueprint
+                blueprints.Add(this.GetBlueprint());
+
+                // add stable blueprint if needed
+                // (If player built a tractor garage first, the game won't let them build a stable since it thinks they already have one. Derived from the CarpenterMenu constructor.)
+                if (!blueprints.Any(p => p.name == "Stable" && p.maxOccupants != this.MaxOccupantsID))
                 {
-                    this.Helper.Reflection
-                        .GetField<List<BluePrint>>(e.NewMenu, "Blueprints")
-                        .GetValue()
-                        .Add(this.GetBlueprint());
+                    Farm farm = Game1.getFarm();
+
+                    int cabins = farm.getNumberBuildingsConstructed("Cabin");
+                    int stables = farm.getNumberBuildingsConstructed("Stable") - Game1.getFarm().buildings.OfType<Stable>().Count(this.IsGarage);
+                    if (stables < cabins + 1)
+                        blueprints.Add(new BluePrint("Stable"));
                 }
             }
         }
@@ -360,12 +430,36 @@ namespace Pathoschild.Stardew.TractorMod
         /// <param name="e">The event arguments.</param>
         private void OnButtonPressed(object sender, ButtonPressedEventArgs e)
         {
-            if (!this.IsEnabled)
+            if (!this.IsEnabled || !Context.IsPlayerFree)
                 return;
 
-            // summon available tractor
-            if (Context.IsPlayerFree && this.Config.Controls.SummonTractor.Contains(e.Button) && !Game1.player.isRidingHorse())
+            if (this.Keys.SummonTractor.Contains(e.Button) && !Game1.player.isRidingHorse())
                 this.SummonTractor();
+            else if (this.Keys.DismissTractor.Contains(e.Button) && Game1.player.isRidingHorse())
+                this.DismissTractor(Game1.player.mount);
+        }
+
+        /// <summary>Raised after a mod message is received over the network.</summary>
+        /// <param name="sender">The event sender.</param>
+        /// <param name="e">The event arguments.</param>
+        private void OnModMessageReceived(object sender, ModMessageReceivedEventArgs e)
+        {
+            // tractor request from a farmhand
+            if (e.Type == this.RequestTractorMessageID && Context.IsMainPlayer && e.FromModID == this.ModManifest.UniqueID)
+            {
+                Farmer player = Game1.getFarmer(e.FromPlayerID);
+                if (player != null && !player.IsMainPlayer)
+                {
+                    this.Monitor.Log(
+                        this.SummonLocalTractorTo(player)
+                            ? $"Summon tractor for {player.Name} ({e.FromPlayerID})."
+                            : $"Received tractor request for {player.Name} ({e.FromPlayerID}), but no tractor is available.",
+                        LogLevel.Trace
+                    );
+                }
+                else
+                    this.Monitor.Log($"Received tractor request for {e.FromPlayerID}, but no such player was found.", LogLevel.Trace);
+            }
         }
 
         /****
@@ -374,24 +468,80 @@ namespace Pathoschild.Stardew.TractorMod
         /// <summary>Summon an unused tractor to the player's current position, if any are available.</summary>
         private void SummonTractor()
         {
-            // find nearest horse in player's current location (if available)
-            Horse horse = this
-                .GetTractorsIn(Game1.currentLocation, includeMounted: false)
-                .OrderBy(match => Utility.distance(Game1.player.getTileX(), Game1.player.getTileY(), match.getTileX(), match.getTileY()))
-                .FirstOrDefault();
-
-            // else get horse from any location
-            if (horse == null)
+            bool summoned = this.SummonLocalTractorTo(Game1.player);
+            if (!summoned && !Context.IsMainPlayer)
             {
-                horse = this
+                this.Monitor.Log("Sending tractor request to host player.", LogLevel.Trace);
+                this.Helper.Multiplayer.SendMessage(
+                    message: true,
+                    messageType: this.RequestTractorMessageID,
+                    modIDs: new[] { this.ModManifest.UniqueID },
+                    playerIDs: new[] { Game1.MasterPlayer.UniqueMultiplayerID }
+                );
+            }
+        }
+
+        /// <summary>Summon an unused tractor to a player's current position, if any are available. If the player is a farmhand in multiplayer, only tractors in synced locations can be found by this method.</summary>
+        /// <param name="player">The target player.</param>
+        /// <returns>Returns whether a tractor was successfully summoned.</returns>
+        private bool SummonLocalTractorTo(Farmer player)
+        {
+            // get player info
+            if (player == null)
+                return false;
+            GameLocation location = player.currentLocation;
+            Vector2 tile = player.getTileLocation();
+
+            // find nearest tractor in player's current location (if available), else any location
+            Horse tractor = this
+                .GetTractorsIn(location, includeMounted: false)
+                .OrderBy(match => Utility.distance(tile.X, tile.Y, match.getTileX(), match.getTileY()))
+                .FirstOrDefault();
+            if (tractor == null)
+            {
+                tractor = this
                     .GetLocations()
-                    .SelectMany(location => this.GetTractorsIn(location, includeMounted: false))
+                    .SelectMany(loc => this.GetTractorsIn(loc, includeMounted: false))
                     .FirstOrDefault();
             }
 
+            // create a tractor if needed
+            if (tractor == null && this.Config.CanSummonWithoutGarage && Context.IsMainPlayer)
+            {
+                Guid id = Guid.NewGuid();
+                tractor = new Horse(id, 0, 0) { Name = TractorManager.GetTractorName(id) };
+                this.ApplyTextures(tractor);
+            }
+
             // warp to player
-            if (horse != null)
-                TractorManager.SetLocation(horse, Game1.currentLocation, Game1.player.getTileLocation());
+            if (tractor != null)
+            {
+                TractorManager.SetLocation(tractor, location, tile);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Send a tractor back home.</summary>
+        /// <param name="tractor">The tractor to dismiss.</param>
+        private void DismissTractor(Horse tractor)
+        {
+            if (tractor == null || !this.IsTractor(tractor))
+                return;
+
+            // dismount
+            if (tractor.rider != null)
+                tractor.dismount();
+
+            // get home position (garage may have been moved since the tractor was spawned)
+            Farm location = Game1.getFarm();
+            Stable garage = location.buildings.OfType<Stable>().FirstOrDefault(p => p.HorseId == tractor.HorseId);
+            Vector2 tile = garage != null
+                ? this.GetDefaultTractorTile(garage)
+                : tractor.DefaultPosition;
+
+            // warp home
+            TractorManager.SetLocation(tractor, location, tile);
         }
 
         /// <summary>Migrate tractors and garages from older versions of the mod.</summary>
@@ -414,7 +564,7 @@ namespace Pathoschild.Stardew.TractorMod
             // get save data
             LegacySaveData saveData = this.Helper.Data.ReadSaveData<LegacySaveData>("tractors"); // 4.6
             if (saveData?.Buildings == null)
-                saveData = this.Helper.Data.ReadJsonFile<LegacySaveData>($"data/{Constants.SaveFolderName}.json"); // pre-4.6
+                saveData = this.Helper.Data.ReadJsonFile<LegacySaveData>(this.LegacySaveDataRelativePath); // pre-4.6
             if (saveData?.Buildings == null)
                 return;
 
@@ -423,7 +573,7 @@ namespace Pathoschild.Stardew.TractorMod
             foreach (LegacySaveDataBuilding garageData in saveData.Buildings)
             {
                 // get location
-                BuildableGameLocation location = locations.FirstOrDefault(p => (p.uniqueName.Value ?? p.Name) == (garageData.Map ?? "Farm"));
+                BuildableGameLocation location = locations.FirstOrDefault(p => p.NameOrUniqueName == (garageData.Map ?? "Farm"));
                 if (location == null)
                 {
                     this.Monitor.Log($"Ignored legacy tractor garage in unknown location '{garageData.Map}'.", LogLevel.Warn);
@@ -448,7 +598,7 @@ namespace Pathoschild.Stardew.TractorMod
         {
             GameLocation[] mainLocations = (Context.IsMainPlayer ? Game1.locations : this.Helper.Multiplayer.GetActiveLocations()).ToArray();
 
-            foreach (GameLocation location in mainLocations)
+            foreach (GameLocation location in mainLocations.Concat(MineShaft.activeMines))
             {
                 yield return location;
 
@@ -522,7 +672,7 @@ namespace Pathoschild.Stardew.TractorMod
                 stable != null
                 && (
                     stable.maxOccupants.Value == this.MaxOccupantsID
-                    || stable.buildingType.Value == this.BlueprintBuildingType // freshly constructed, not yet normalised
+                    || stable.buildingType.Value == this.BlueprintBuildingType // freshly constructed, not yet normalized
                 );
         }
 
@@ -545,10 +695,15 @@ namespace Pathoschild.Stardew.TractorMod
                 tilesWidth = 4,
                 tilesHeight = 2,
                 sourceRectForMenuView = new Rectangle(0, 0, 64, 96),
-                itemsRequired = this.Config.BuildUsesResources
-                    ? new Dictionary<int, int> { [SObject.ironBar] = 20, [SObject.iridiumBar] = 5, [787/* battery pack */] = 5 }
-                    : new Dictionary<int, int>()
+                itemsRequired = this.Config.BuildMaterials
             };
+        }
+
+        /// <summary>Get the default tractor tile position in a garage.</summary>
+        /// <param name="garage">The tractor's home garage.</param>
+        private Vector2 GetDefaultTractorTile(Stable garage)
+        {
+            return new Vector2(garage.tileX.Value + 1, garage.tileY.Value + 1);
         }
 
         /// <summary>Get the asset key for a texture from the assets folder (including seasonal logic if applicable).</summary>
@@ -565,33 +720,33 @@ namespace Pathoschild.Stardew.TractorMod
         }
 
         /// <summary>Apply the mod textures to the given menu, if applicable.</summary>
-        /// <param name="currentMenu">The menu to change.</param>
-        private void ApplyTextures(IClickableMenu currentMenu)
+        /// <param name="menu">The menu to change.</param>
+        private void ApplyTextures(IClickableMenu menu)
         {
-            switch (currentMenu)
+            // vanilla menu
+            if (menu is CarpenterMenu carpenterMenu)
             {
-                // vanilla menu
-                case CarpenterMenu menu:
-                    if (menu.CurrentBlueprint.maxOccupants == this.MaxOccupantsID)
-                    {
-                        Building building = this.Helper.Reflection.GetField<Building>(menu, "currentBuilding").GetValue();
-                        if (building.texture.Value != this.GarageTexture)
-                            building.texture = new Lazy<Texture2D>(() => this.GarageTexture);
-                    }
-                    break;
+                if (carpenterMenu.CurrentBlueprint.maxOccupants == this.MaxOccupantsID)
+                {
+                    Building building = this.Helper.Reflection.GetField<Building>(carpenterMenu, "currentBuilding").GetValue();
+                    if (building.texture.Value != this.GarageTexture)
+                        building.texture = new Lazy<Texture2D>(() => this.GarageTexture);
+                }
+                return;
+            }
 
-                // Pelican Fiber menu
-                case IClickableMenu menu when menu.GetType().FullName == this.PelicanFiberMenuFullName:
-                    {
-                        BluePrint currentBlueprint = this.Helper.Reflection.GetProperty<BluePrint>(menu, "CurrentBlueprint").GetValue();
-                        if (currentBlueprint.maxOccupants == this.MaxOccupantsID)
-                        {
-                            Building building = this.Helper.Reflection.GetField<Building>(menu, "CurrentBuilding").GetValue();
-                            if (building.texture.Value != this.GarageTexture)
-                                building.texture = new Lazy<Texture2D>(() => this.GarageTexture);
-                        }
-                    }
-                    break;
+            // Farm Expansion & Pelican Fiber menus
+            bool isFarmExpansion = menu.GetType().FullName == this.FarmExpansionMenuFullName;
+            bool isPelicanFiber = !isFarmExpansion && menu.GetType().FullName == this.PelicanFiberMenuFullName;
+            if (isFarmExpansion || isPelicanFiber)
+            {
+                BluePrint currentBlueprint = this.Helper.Reflection.GetProperty<BluePrint>(menu, isFarmExpansion ? "CurrentBlueprint" : "currentBlueprint").GetValue();
+                if (currentBlueprint.maxOccupants == this.MaxOccupantsID)
+                {
+                    Building building = this.Helper.Reflection.GetField<Building>(menu, "currentBuilding").GetValue();
+                    if (building.texture.Value != this.GarageTexture)
+                        building.texture = new Lazy<Texture2D>(() => this.GarageTexture);
+                }
             }
         }
 

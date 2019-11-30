@@ -1,6 +1,8 @@
+using System;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Pathoschild.Stardew.TractorMod.Framework.Config;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using StardewValley.Tools;
@@ -12,10 +14,13 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
     internal class ScytheAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The attachment settings.</summary>
         private readonly ScytheConfig Config;
+
+        /// <summary>A fake pickaxe to use for clearing dead crops.</summary>
+        private readonly Pickaxe FakePickaxe = new Pickaxe();
 
 
         /*********
@@ -23,7 +28,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The mod configuration.</param>
-        public ScytheAttachment(ScytheConfig config)
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public ScytheAttachment(ScytheConfig config, IReflectionHelper reflection)
+            : base(reflection)
         {
             this.Config = config;
         }
@@ -35,7 +42,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         /// <param name="location">The current location.</param>
         public override bool IsEnabled(Farmer player, Tool tool, Item item, GameLocation location)
         {
-            return tool is MeleeWeapon && tool.Name.ToLower().Contains("scythe");
+            return tool is MeleeWeapon weapon && weapon.isScythe();
         }
 
         /// <summary>Apply the tool to the given tile.</summary>
@@ -51,7 +58,21 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
             // spawned forage
             if (this.Config.HarvestForage && tileObj?.IsSpawnedObject == true)
             {
-                this.CheckTileAction(location, tile, player);
+                // pick up forage & cancel animation
+                if (this.CheckTileAction(location, tile, player))
+                {
+                    IReflectedField<int> animationID = this.Reflection.GetField<int>(player.FarmerSprite, "currentSingleAnimation");
+                    switch (animationID.GetValue())
+                    {
+                        case FarmerSprite.harvestItemDown:
+                        case FarmerSprite.harvestItemLeft:
+                        case FarmerSprite.harvestItemRight:
+                        case FarmerSprite.harvestItemUp:
+                            player.completelyStopAnimatingOrDoingAction();
+                            player.forceCanMove();
+                            break;
+                    }
+                }
                 return true;
             }
 
@@ -63,18 +84,27 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
 
                 if (this.Config.ClearDeadCrops && dirt.crop.dead.Value)
                 {
-                    this.UseToolOnTile(new Pickaxe(), tile); // clear dead crop
+                    this.UseToolOnTile(this.FakePickaxe, tile, player, location); // clear dead crop
                     return true;
                 }
 
-                if (this.Config.HarvestCrops)
+                bool shouldHarvest = dirt.crop.programColored.Value // from Utility.findCloseFlower
+                    ? this.Config.HarvestFlowers
+                    : this.Config.HarvestCrops;
+                if (shouldHarvest)
                 {
-                    if (dirt.crop.harvestMethod.Value == Crop.sickleHarvest)
-                        return dirt.performToolAction(tool, 0, tile, location);
-                    else
-                        this.CheckTileAction(location, tile, player);
+                    return dirt.crop.harvestMethod.Value == Crop.sickleHarvest
+                        ? dirt.performToolAction(tool, 0, tile, location)
+                        : dirt.performUseAction(tile, location);
                 }
 
+                return true;
+            }
+
+            // machines
+            if (this.Config.HarvestMachines && tileObj != null && tileObj.readyForHarvest.Value && tileObj.heldObject.Value != null)
+            {
+                tileObj.checkForAction(Game1.player);
                 return true;
             }
 
@@ -86,18 +116,28 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
             }
 
             // grass
+            // (see Grass.performToolAction)
             if (this.Config.HarvestGrass && tileFeature is Grass)
             {
                 location.terrainFeatures.Remove(tile);
-                if (Game1.getFarm().tryToAddHay(1) == 0) // returns number left
-                    Game1.addHUDMessage(new HUDMessage("Hay", HUDMessage.achievement_type, true, Color.LightGoldenrodYellow, new SObject(178, 1)));
+
+                Random random = Game1.IsMultiplayer
+                    ? Game1.recentMultiplayerRandom
+                    : new Random((int)(Game1.uniqueIDForThisGame + tile.X * 1000.0 + tile.Y * 11.0));
+
+                if (random.NextDouble() < (tool.InitialParentTileIndex == MeleeWeapon.goldenScythe ? 0.75 : 0.5))
+                {
+                    if (Game1.getFarm().tryToAddHay(1) == 0) // returns number left
+                        Game1.addHUDMessage(new HUDMessage("Hay", HUDMessage.achievement_type, true, Color.LightGoldenrodYellow, new SObject(178, 1)));
+                }
+
                 return true;
             }
 
             // weeds
             if (this.Config.ClearWeeds && this.IsWeed(tileObj))
             {
-                this.UseToolOnTile(tool, tile); // doesn't do anything to the weed, but sets up for the tool action (e.g. sets last user)
+                this.UseToolOnTile(tool, tile, player, location); // doesn't do anything to the weed, but sets up for the tool action (e.g. sets last user)
                 tileObj.performToolAction(tool, location); // triggers weed drops, but doesn't remove weed
                 location.removeObject(tile, false);
                 return true;
@@ -105,9 +145,10 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
 
             // bush
             Rectangle tileArea = this.GetAbsoluteTileArea(tile);
-            if (this.Config.HarvestForage && location.largeTerrainFeatures.FirstOrDefault(p => p.getBoundingBox(p.tilePosition.Value).Intersects(tileArea)) is Bush bush)
+            if (this.Config.HarvestForage)
             {
-                if (!bush.townBush.Value && bush.tileSheetOffset.Value == 1 && bush.inBloom(Game1.currentSeason, Game1.dayOfMonth))
+                Bush bush = tileFeature as Bush ?? location.largeTerrainFeatures.FirstOrDefault(p => p.getBoundingBox(p.tilePosition.Value).Intersects(tileArea)) as Bush;
+                if (bush?.tileSheetOffset.Value == 1 && (bush.size.Value == Bush.greenTeaBush || (bush.size.Value == Bush.mediumBush && !bush.townBush.Value)))
                 {
                     bush.performUseAction(bush.tilePosition.Value, location);
                     return true;

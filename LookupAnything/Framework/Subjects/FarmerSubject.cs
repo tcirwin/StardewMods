@@ -18,15 +18,12 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
     internal class FarmerSubject : BaseSubject
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
-        /// <summary>Simplifies access to private game code.</summary>
-        private readonly IReflectionHelper Reflection;
-
         /// <summary>The lookup target.</summary>
         private readonly SFarmer Target;
 
-        /// <summary>Whether this is being displayed on the load menu, before the save data is fully initialised.</summary>
+        /// <summary>Whether this is being displayed on the load menu, before the save data is fully initialized.</summary>
         private readonly bool IsLoadMenu;
 
         /// <summary>The raw save data for this player, if <see cref="IsLoadMenu"/> is true.</summary>
@@ -40,12 +37,10 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
         /// <param name="gameHelper">Provides utility methods for interacting with the game code.</param>
         /// <param name="farmer">The lookup target.</param>
         /// <param name="translations">Provides translations stored in the mod folder.</param>
-        /// <param name="reflectionHelper">Simplifies access to private game code.</param>
-        /// <param name="isLoadMenu">Whether this is being displayed on the load menu, before the save data is fully initialised.</param>
-        public FarmerSubject(GameHelper gameHelper, SFarmer farmer, ITranslationHelper translations, IReflectionHelper reflectionHelper, bool isLoadMenu = false)
-            : base(gameHelper, farmer.Name, null, translations.Get(L10n.Types.Player), translations)
+        /// <param name="isLoadMenu">Whether this is being displayed on the load menu, before the save data is fully initialized.</param>
+        public FarmerSubject(GameHelper gameHelper, SFarmer farmer, ITranslationHelper translations, bool isLoadMenu = false)
+            : base(gameHelper, farmer.Name, null, L10n.Types.Player(), translations)
         {
-            this.Reflection = reflectionHelper;
             this.Target = farmer;
             this.IsLoadMenu = isLoadMenu;
             this.RawSaveData = isLoadMenu
@@ -57,23 +52,35 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
         /// <param name="metadata">Provides metadata that's not available from the game data directly.</param>
         public override IEnumerable<ICustomField> GetData(Metadata metadata)
         {
-            SFarmer farmer = this.Target;
+            SFarmer target = this.Target;
 
+            // basic info
+            yield return new GenericField(this.GameHelper, L10n.Player.Gender(), target.IsMale ? L10n.Player.GenderMale() : L10n.Player.GenderFemale());
+            yield return new GenericField(this.GameHelper, L10n.Player.FarmName(), target.farmName.Value);
+            yield return new GenericField(this.GameHelper, L10n.Player.FarmMap(), this.GetFarmType());
+            yield return new GenericField(this.GameHelper, L10n.Player.FavoriteThing(), target.favoriteThing.Value);
+            yield return new GenericField(this.GameHelper, Game1.player.spouse == "Krobus" ? L10n.Player.Housemate() : L10n.Player.Spouse(), this.GetSpouseName());
+
+            // saw a movie this week
+            if (Utility.doesMasterPlayerHaveMailReceivedButNotMailForTomorrow("ccMovieTheater"))
+                yield return new GenericField(this.GameHelper, L10n.Player.WatchedMovieThisWeek(), this.Stringify(target.lastSeenMovieWeek.Value >= Game1.Date.TotalSundayWeeks));
+
+            // skills
             int maxSkillPoints = metadata.Constants.PlayerMaxSkillPoints;
             int[] skillPointsPerLevel = metadata.Constants.PlayerSkillPointsPerLevel;
-            string luckSummary = this.Translate(L10n.Player.LuckSummary, new { percent = (Game1.dailyLuck >= 0 ? "+" : "") + Math.Round(Game1.dailyLuck * 100, 2) });
+            yield return new SkillBarField(this.GameHelper, L10n.Player.FarmingSkill(), target.experiencePoints[SFarmer.farmingSkill], maxSkillPoints, skillPointsPerLevel);
+            yield return new SkillBarField(this.GameHelper, L10n.Player.MiningSkill(), target.experiencePoints[SFarmer.miningSkill], maxSkillPoints, skillPointsPerLevel);
+            yield return new SkillBarField(this.GameHelper, L10n.Player.ForagingSkill(), target.experiencePoints[SFarmer.foragingSkill], maxSkillPoints, skillPointsPerLevel);
+            yield return new SkillBarField(this.GameHelper, L10n.Player.FishingSkill(), target.experiencePoints[SFarmer.fishingSkill], maxSkillPoints, skillPointsPerLevel);
+            yield return new SkillBarField(this.GameHelper, L10n.Player.CombatSkill(), target.experiencePoints[SFarmer.combatSkill], maxSkillPoints, skillPointsPerLevel);
 
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.Gender), this.Translate(farmer.IsMale ? L10n.Player.GenderMale : L10n.Player.GenderFemale));
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.FarmName), farmer.farmName.Value);
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.FarmMap), this.GetFarmType());
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.FavoriteThing), farmer.favoriteThing.Value);
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.Spouse), this.GetSpouseName());
-            yield return new SkillBarField(this.GameHelper, this.Translate(L10n.Player.FarmingSkill), farmer.experiencePoints[SFarmer.farmingSkill], maxSkillPoints, skillPointsPerLevel, this.Text);
-            yield return new SkillBarField(this.GameHelper, this.Translate(L10n.Player.MiningSkill), farmer.experiencePoints[SFarmer.miningSkill], maxSkillPoints, skillPointsPerLevel, this.Text);
-            yield return new SkillBarField(this.GameHelper, this.Translate(L10n.Player.ForagingSkill), farmer.experiencePoints[SFarmer.foragingSkill], maxSkillPoints, skillPointsPerLevel, this.Text);
-            yield return new SkillBarField(this.GameHelper, this.Translate(L10n.Player.FishingSkill), farmer.experiencePoints[SFarmer.fishingSkill], maxSkillPoints, skillPointsPerLevel, this.Text);
-            yield return new SkillBarField(this.GameHelper, this.Translate(L10n.Player.CombatSkill), farmer.experiencePoints[SFarmer.combatSkill], maxSkillPoints, skillPointsPerLevel, this.Text);
-            yield return new GenericField(this.GameHelper, this.Translate(L10n.Player.Luck), $"{this.GetSpiritLuckMessage()}{Environment.NewLine}({luckSummary})");
+            // luck
+            string luckSummary = L10n.Player.LuckSummary(percent: (Game1.player.DailyLuck >= 0 ? "+" : "") + Math.Round(Game1.player.DailyLuck * 100, 2));
+            yield return new GenericField(this.GameHelper, L10n.Player.Luck(), $"{this.GetSpiritLuckMessage()}{Environment.NewLine}({luckSummary})");
+
+            // save version
+            if (this.IsLoadMenu)
+                yield return new GenericField(this.GameHelper, L10n.Player.SaveFormat(), this.GetSaveFormat(this.RawSaveData.Value));
         }
 
         /// <summary>Get raw debug data to display for this subject.</summary>
@@ -99,14 +106,14 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
         /// <returns>Returns <c>true</c> if a portrait was drawn, else <c>false</c>.</returns>
         public override bool DrawPortrait(SpriteBatch spriteBatch, Vector2 position, Vector2 size)
         {
-            SFarmer farmer = this.Target;
+            SFarmer target = this.Target;
 
             if (this.IsLoadMenu)
-                farmer.FarmerRenderer.draw(spriteBatch, new FarmerSprite.AnimationFrame(0, 0, false, false), 0, new Rectangle(0, 0, 16, 32), position, Vector2.Zero, 0.8f, 2, Color.White, 0.0f, 1f, farmer);
+                target.FarmerRenderer.draw(spriteBatch, new FarmerSprite.AnimationFrame(0, 0, false, false), 0, new Rectangle(0, 0, 16, 32), position, Vector2.Zero, 0.8f, 2, Color.White, 0.0f, 1f, target);
             else
             {
-                FarmerSprite sprite = farmer.FarmerSprite;
-                farmer.FarmerRenderer.draw(spriteBatch, sprite.CurrentAnimationFrame, sprite.CurrentFrame, sprite.SourceRect, position, Vector2.Zero, 0.8f, Color.White, 0, 1f, farmer);
+                FarmerSprite sprite = target.FarmerSprite;
+                target.FarmerRenderer.draw(spriteBatch, sprite.CurrentAnimationFrame, sprite.CurrentFrame, sprite.SourceRect, position, Vector2.Zero, 0.8f, Color.White, 0, 1f, target);
             }
 
             return true;
@@ -114,7 +121,7 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
 
 
         /*********
-        ** Public methods
+        ** Private methods
         *********/
         /// <summary>Get a summary of the player's luck today.</summary>
         /// <remarks>Derived from <see cref="GameLocation.answerDialogueAction"/>.</remarks>
@@ -127,12 +134,11 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
                 if (rawDailyLuck == null)
                     return null;
 
-                Game1.dailyLuck = double.Parse(rawDailyLuck);
+                Game1.player.team.sharedDailyLuck.Value = double.Parse(rawDailyLuck);
             }
 
             // get daily luck message
-            TV tv = new TV();
-            return this.Reflection.GetMethod(tv, "getFortuneForecast").Invoke<string>();
+            return new TV().getFortuneForecast(this.Target);
         }
 
         /// <summary>Get the human-readable farm type selected by the player.</summary>
@@ -153,18 +159,20 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
                     return null;
 
                 case Farm.combat_layout:
-                    return this.Translate(L10n.Player.FarmMapWilderness);
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmCombat").Replace("_", Environment.NewLine);
                 case Farm.default_layout:
-                    return this.Translate(L10n.Player.FarmMapStandard);
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmStandard").Replace("_", Environment.NewLine);
                 case Farm.forest_layout:
-                    return this.Translate(L10n.Player.FarmMapForest);
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmForaging").Replace("_", Environment.NewLine);
                 case Farm.mountains_layout:
-                    return this.Translate(L10n.Player.FarmMapHillTop);
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmMining").Replace("_", Environment.NewLine);
                 case Farm.riverlands_layout:
-                    return this.Translate(L10n.Player.FarmMapRiverland);
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmFishing").Replace("_", Environment.NewLine);
+                case Farm.fourCorners_layout:
+                    return Game1.content.LoadString("Strings\\UI:Character_FarmFourCorners").Replace("_", Environment.NewLine);
 
                 default:
-                    return this.Translate(L10n.Player.FarmMapCustom);
+                    return L10n.Player.FarmMapCustom();
             }
         }
 
@@ -196,6 +204,31 @@ namespace Pathoschild.Stardew.LookupAnything.Framework.Subjects
             // read contents
             string text = File.ReadAllText(file.FullName);
             return XElement.Parse(text);
+        }
+
+        /// <summary>Get the last game version which wrote to a save file.</summary>
+        /// <param name="saveData">The save data to check.</param>
+        private string GetSaveFormat(XElement saveData)
+        {
+            // >=1.4
+            string version = saveData.Element("gameVersion")?.Value;
+            if (!string.IsNullOrWhiteSpace(version))
+                return version;
+
+            // 1.4
+            if (saveData.Element("hasApplied1_4_UpdateChanges") != null)
+                return "1.4";
+
+            // 1.3
+            if (saveData.Element("hasApplied1_3_UpdateChanges") != null)
+                return "1.3";
+
+            // 1.1/1.2
+            if (saveData.Element("whichFarm") != null)
+                return "1.1 - 1.2";
+
+            // 1.0
+            return "1.0";
         }
     }
 }

@@ -6,10 +6,10 @@ using StardewModdingAPI;
 namespace ContentPatcher.Framework.Patches
 {
     /// <summary>A patch which can be applied to an asset.</summary>
-    internal interface IPatch
+    internal interface IPatch : IContextual
     {
         /*********
-        ** Properties
+        ** Accessors
         *********/
         /// <summary>A unique name for this patch shown in log messages.</summary>
         string LogName { get; }
@@ -20,20 +20,20 @@ namespace ContentPatcher.Framework.Patches
         /// <summary>The content pack which requested the patch.</summary>
         ManagedContentPack ContentPack { get; }
 
-        /// <summary>The normalised asset name to intercept.</summary>
-        string AssetName { get; }
+        /// <summary>The normalized asset key from which to load the local asset (if applicable).</summary>
+        string FromAsset { get; }
+
+        /// <summary>The raw asset key from which to load the local asset (if applicable), including tokens.</summary>
+        ITokenString RawFromAsset { get; }
+
+        /// <summary>The normalized asset name to intercept.</summary>
+        string TargetAsset { get; }
 
         /// <summary>The raw asset name to intercept, including tokens.</summary>
-        TokenString TokenableAssetName { get; }
+        ITokenString RawTargetAsset { get; }
 
         /// <summary>The conditions which determine whether this patch should be applied.</summary>
-        ConditionDictionary Conditions { get; }
-
-        /// <summary>Whether this patch should be applied in the latest context.</summary>
-        bool MatchesContext { get; }
-
-        /// <summary>Whether this patch is valid if <see cref="MatchesContext"/> is true.</summary>
-        bool IsValidInContext { get; }
+        Condition[] Conditions { get; }
 
         /// <summary>Whether the patch is currently applied to the target asset.</summary>
         bool IsApplied { get; set; }
@@ -42,10 +42,8 @@ namespace ContentPatcher.Framework.Patches
         /*********
         ** Public methods
         *********/
-        /// <summary>Update the patch data when the context changes.</summary>
-        /// <param name="context">Provides access to contextual tokens.</param>
-        /// <returns>Returns whether the patch data changed.</returns>
-        bool UpdateContext(IContext context);
+        /// <summary>Get whether the <see cref="FromAsset"/> file exists.</summary>
+        bool FromAssetExists();
 
         /// <summary>Load the initial version of the asset.</summary>
         /// <typeparam name="T">The asset type.</typeparam>
@@ -59,7 +57,10 @@ namespace ContentPatcher.Framework.Patches
         /// <exception cref="System.NotSupportedException">The current patch type doesn't support editing assets.</exception>
         void Edit<T>(IAssetData asset);
 
-        /// <summary>Get the tokens used by this patch in its fields.</summary>
-        IEnumerable<TokenName> GetTokensUsed();
+        /// <summary>Get the context which provides tokens for this patch, including patch-specific tokens like <see cref="ConditionType.Target"/>.</summary>
+        IContext GetPatchContext();
+
+        /// <summary>Get a human-readable list of changes applied to the asset for display when troubleshooting.</summary>
+        IEnumerable<string> GetChangeLabels();
     }
 }

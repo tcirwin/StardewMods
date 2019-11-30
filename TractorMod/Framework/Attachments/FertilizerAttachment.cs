@@ -1,19 +1,20 @@
 using Microsoft.Xna.Framework;
 using Pathoschild.Stardew.TractorMod.Framework.Config;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.TerrainFeatures;
 using SObject = StardewValley.Object;
 
 namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
 {
-    /// <summary>An attachment for fertiliser or speed-gro.</summary>
+    /// <summary>An attachment for fertilizer or speed-gro.</summary>
     internal class FertilizerAttachment : BaseAttachment
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>The attachment settings.</summary>
-        private readonly FertilizerConfig Config;
+        private readonly GenericAttachmentConfig Config;
 
 
         /*********
@@ -21,7 +22,9 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
         *********/
         /// <summary>Construct an instance.</summary>
         /// <param name="config">The attachment settings.</param>
-        public FertilizerAttachment(FertilizerConfig config)
+        /// <param name="reflection">Simplifies access to private code.</param>
+        public FertilizerAttachment(GenericAttachmentConfig config, IReflectionHelper reflection)
+            : base(reflection)
         {
             this.Config = config;
         }
@@ -49,7 +52,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
             if (item == null || item.Stack <= 0)
                 return false;
 
-            // get dirt
+            // get unfertilised dirt
             if (!this.TryGetHoeDirt(tileFeature, tileObj, out HoeDirt dirt, out bool dirtCoveredByObj) || dirt.fertilizer.Value != HoeDirt.noFertilizer)
                 return false;
 
@@ -57,7 +60,7 @@ namespace Pathoschild.Stardew.TractorMod.Framework.Attachments
             if (dirtCoveredByObj || this.GetResourceClumpCoveringTile(location, tile) != null)
                 return false;
 
-            // apply fertiliser
+            // apply fertilizer
             dirt.fertilizer.Value = item.ParentSheetIndex;
             this.ConsumeItem(player, item);
             return true;

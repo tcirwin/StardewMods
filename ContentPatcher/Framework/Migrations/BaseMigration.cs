@@ -1,6 +1,6 @@
-using ContentPatcher.Framework.Conditions;
 using ContentPatcher.Framework.ConfigModels;
-using ContentPatcher.Framework.Tokens;
+using ContentPatcher.Framework.Lexing.LexTokens;
+using ContentPatcher.Framework.Tokens.Json;
 using Pathoschild.Stardew.Common.Utilities;
 using StardewModdingAPI;
 
@@ -36,17 +36,30 @@ namespace ContentPatcher.Framework.Migrations
             return true;
         }
 
-        /// <summary>Migrate a token name.</summary>
-        /// <param name="name">The token name to migrate.</param>
+        /// <summary>Migrate a lexical token.</summary>
+        /// <param name="lexToken">The lexical token to migrate.</param>
         /// <param name="error">An error message which indicates why migration failed (if any).</param>
         /// <returns>Returns whether migration succeeded.</returns>
-        public virtual bool TryMigrate(ref TokenName name, out string error)
+        public virtual bool TryMigrate(ref ILexToken lexToken, out string error)
         {
-            // tokens which need a high version
-            if (this.AddedTokens.Contains(name.Key))
+            if (lexToken is LexTokenToken token)
             {
-                error = this.GetNounPhraseError($"using token {name}");
-                return false;
+                // tokens which need a higher version
+                if (this.AddedTokens?.Contains(token.Name) == true)
+                {
+                    error = this.GetNounPhraseError($"using token {token.Name}");
+                    return false;
+                }
+
+                // check input arguments
+                if (token.InputArg != null)
+                {
+                    for (int i = 0; i < token.InputArg.Value.Parts.Length; i++)
+                    {
+                        if (!this.TryMigrate(ref token.InputArg.Value.Parts[i], out error))
+                            return false;
+                    }
+                }
             }
 
             // no issue found
@@ -54,23 +67,36 @@ namespace ContentPatcher.Framework.Migrations
             return true;
         }
 
-        /// <summary>Migrate a tokenised string.</summary>
-        /// <param name="tokenStr">The tokenised string to migrate.</param>
+        /// <summary>Migrate a tokenized string.</summary>
+        /// <param name="tokenStr">The tokenized string to migrate.</param>
         /// <param name="error">An error message which indicates why migration failed (if any).</param>
         /// <returns>Returns whether migration succeeded.</returns>
-        public virtual bool TryMigrate(ref TokenString tokenStr, out string error)
+        public virtual bool TryMigrate(IParsedTokenString tokenStr, out string error)
         {
-            // tokens which need a high version
-            foreach (TokenName token in tokenStr.Tokens)
+            // tokens which need a higher version
+            for (int i = 0; i < tokenStr.LexTokens.Length; i++)
             {
-                if (this.AddedTokens.Contains(token.Key))
-                {
-                    error = this.GetNounPhraseError($"using token {token.Key}");
+                if (!this.TryMigrate(ref tokenStr.LexTokens[i], out error))
                     return false;
-                }
             }
 
             // no issue found
+            error = null;
+            return true;
+        }
+
+        /// <summary>Migrate a tokenized JSON structure.</summary>
+        /// <param name="tokenStructure">The tokenized JSON structure to migrate.</param>
+        /// <param name="error">An error message which indicates why migration failed (if any).</param>
+        /// <returns>Returns whether migration succeeded.</returns>
+        public bool TryMigrate(TokenizableJToken tokenStructure, out string error)
+        {
+            foreach (IParsedTokenString str in tokenStructure.GetTokenStrings())
+            {
+                if (!this.TryMigrate(str, out error))
+                    return false;
+            }
+
             error = null;
             return true;
         }

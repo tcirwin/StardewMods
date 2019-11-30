@@ -2,12 +2,15 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 using Microsoft.Xna.Framework;
 using Netcode;
 using Pathoschild.Stardew.LookupAnything.Framework.Constants;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
+using StardewValley.Network;
 
 namespace Pathoschild.Stardew.LookupAnything.Framework
 {
@@ -20,11 +23,11 @@ namespace Pathoschild.Stardew.LookupAnything.Framework
         /// <summary>Select the correct translation based on the plural form.</summary>
         /// <param name="translations">The translation helper.</param>
         /// <param name="count">The number.</param>
-        /// <param name="singleKey">The singular form.</param>
-        /// <param name="pluralKey">The plural form.</param>
-        public static Translation GetPlural(this ITranslationHelper translations, int count, string singleKey, string pluralKey)
+        /// <param name="singleText">The singular form.</param>
+        /// <param name="pluralText">The plural form.</param>
+        public static Translation GetPlural(this ITranslationHelper translations, int count, Translation singleText, Translation pluralText)
         {
-            return translations.Get(count == 1 ? singleKey : pluralKey);
+            return count == 1 ? singleText : pluralText;
         }
 
         /// <summary>Get a translated season name from the game.</summary>
@@ -56,14 +59,24 @@ namespace Pathoschild.Stardew.LookupAnything.Framework
         /// <param name="withYear">Whether to include the year number.</param>
         public static string Stringify(this ITranslationHelper translations, SDate date, bool withYear)
         {
-            string key = withYear ? L10n.Generic.DateWithYear : L10n.Generic.Date;
-            return translations.Get(key, new
+            if (withYear)
             {
-                seasonNumber = Utility.getSeasonNumber(date.Season),
-                seasonName = Utility.getSeasonNameFromNumber(Utility.getSeasonNumber(date.Season)),
-                dayNumber = date.Day,
-                year = date.Year
-            });
+                return L10n.Generic.DateWithYear(
+                    seasonNumber: Utility.getSeasonNumber(date.Season),
+                    seasonName: Utility.getSeasonNameFromNumber(Utility.getSeasonNumber(date.Season)),
+                    dayNumber: date.Day,
+                    year: date.Year
+                );
+            }
+            else
+            {
+                return L10n.Generic.Date(
+                    seasonNumber: Utility.getSeasonNumber(date.Season),
+                    seasonName: Utility.getSeasonNameFromNumber(Utility.getSeasonNumber(date.Season)),
+                    dayNumber: date.Day,
+                    year: date.Year
+                );
+            }
         }
 
         /// <summary>Get a human-readable representation of a value.</summary>
@@ -83,6 +96,8 @@ namespace Pathoschild.Stardew.LookupAnything.Framework
                     return translations.Stringify(net.Value);
                 case NetColor net:
                     return translations.Stringify(net.Value);
+                case NetDancePartner net:
+                    return translations.Stringify(net.Value?.Name);
                 case NetDouble net:
                     return translations.Stringify(net.Value);
                 case NetFloat net:
@@ -91,9 +106,13 @@ namespace Pathoschild.Stardew.LookupAnything.Framework
                     return translations.Stringify(net.Value);
                 case NetInt net:
                     return translations.Stringify(net.Value);
+                case NetLocationRef net:
+                    return translations.Stringify(net.Value?.NameOrUniqueName);
                 case NetLong net:
                     return translations.Stringify(net.Value);
                 case NetPoint net:
+                    return translations.Stringify(net.Value);
+                case NetPosition net:
                     return translations.Stringify(net.Value);
                 case NetRectangle net:
                     return translations.Stringify(net.Value);
@@ -102,45 +121,46 @@ namespace Pathoschild.Stardew.LookupAnything.Framework
                 case NetVector2 net:
                     return translations.Stringify(net.Value);
 
-                // boolean
+                // core types
                 case bool boolean:
-                    return translations.Get(boolean ? L10n.Generic.Yes : L10n.Generic.No);
-
-                // game date
+                    return boolean ? L10n.Generic.Yes() : L10n.Generic.No();
+                case Color color:
+                    return $"(r:{color.R} g:{color.G} b:{color.B} a:{color.A})";
                 case SDate date:
-                    return translations.Stringify(date, withYear: false);
-
-                // time span
+                    return translations.Stringify(date, withYear: date.Year != Game1.year);
                 case TimeSpan span:
                     {
                         List<string> parts = new List<string>();
                         if (span.Days > 0)
-                            parts.Add(translations.Get(L10n.Generic.Days, new { count = span.Days }));
+                            parts.Add(L10n.Generic.Days(span.Days));
                         if (span.Hours > 0)
-                            parts.Add(translations.Get(L10n.Generic.Hours, new { count = span.Hours }));
+                            parts.Add(L10n.Generic.Hours(span.Hours));
                         if (span.Minutes > 0)
-                            parts.Add(translations.Get(L10n.Generic.Minutes, new { count = span.Minutes }));
+                            parts.Add(L10n.Generic.Minutes(span.Minutes));
                         return string.Join(", ", parts);
                     }
-
-                // vector
                 case Vector2 vector:
                     return $"({vector.X}, {vector.Y})";
-
-                // rectangle
                 case Rectangle rect:
                     return $"(x:{rect.X}, y:{rect.Y}, width:{rect.Width}, height:{rect.Height})";
 
-                // array
+                // game types
+                case AnimatedSprite sprite:
+                    return $"(textureName: {sprite.textureName.Value}, currentFrame:{sprite.currentFrame}, loop:{sprite.loop}, sourceRect:{translations.Stringify(sprite.sourceRect)})";
+                case Stats stats:
+                    {
+                        StringBuilder str = new StringBuilder();
+                        foreach (FieldInfo field in stats.GetType().GetFields())
+                            str.AppendLine($"- {field.Name}: {translations.Stringify(field.GetValue(stats))}");
+                        return str.ToString();
+                    }
+
+                // enumerable
                 case IEnumerable array when !(value is string):
                     {
                         string[] values = (from val in array.Cast<object>() select translations.Stringify(val)).ToArray();
                         return "(" + string.Join(", ", values) + ")";
                     }
-
-                // color
-                case Color color:
-                    return $"(r:{color.R} g:{color.G} b:{color.B} a:{color.A})";
 
                 default:
                     // key/value pair

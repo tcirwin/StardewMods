@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using ContentPatcher.Framework.Conditions;
-using ContentPatcher.Framework.Tokens;
+using ContentPatcher.Framework.ConfigModels;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
@@ -14,13 +13,10 @@ namespace ContentPatcher.Framework.Patches
     internal class EditImagePatch : Patch
     {
         /*********
-        ** Properties
+        ** Fields
         *********/
         /// <summary>Encapsulates monitoring and logging.</summary>
         private readonly IMonitor Monitor;
-
-        /// <summary>The asset key to load from the content pack instead.</summary>
-        private readonly TokenString FromLocalAsset;
 
         /// <summary>The sprite area from which to read an image.</summary>
         private readonly Rectangle? FromArea;
@@ -31,6 +27,9 @@ namespace ContentPatcher.Framework.Patches
         /// <summary>Indicates how the image should be patched.</summary>
         private readonly PatchMode PatchMode;
 
+        /// <summary>Whether the patch extended the last image asset it was applied to.</summary>
+        private bool ResizedLastImage;
+
 
         /*********
         ** Public methods
@@ -38,31 +37,21 @@ namespace ContentPatcher.Framework.Patches
         /// <summary>Construct an instance.</summary>
         /// <param name="logName">A unique name for this patch shown in log messages.</param>
         /// <param name="contentPack">The content pack which requested the patch.</param>
-        /// <param name="assetName">The normalised asset name to intercept.</param>
+        /// <param name="assetName">The normalized asset name to intercept.</param>
         /// <param name="conditions">The conditions which determine whether this patch should be applied.</param>
-        /// <param name="fromLocalAsset">The asset key to load from the content pack instead.</param>
+        /// <param name="fromAsset">The asset key to load from the content pack instead.</param>
         /// <param name="fromArea">The sprite area from which to read an image.</param>
         /// <param name="toArea">The sprite area to overwrite.</param>
         /// <param name="patchMode">Indicates how the image should be patched.</param>
         /// <param name="monitor">Encapsulates monitoring and logging.</param>
-        /// <param name="normaliseAssetName">Normalise an asset name.</param>
-        public EditImagePatch(string logName, ManagedContentPack contentPack, TokenString assetName, ConditionDictionary conditions, TokenString fromLocalAsset, Rectangle fromArea, Rectangle toArea, PatchMode patchMode, IMonitor monitor, Func<string, string> normaliseAssetName)
-            : base(logName, PatchType.EditImage, contentPack, assetName, conditions, normaliseAssetName)
+        /// <param name="normalizeAssetName">Normalize an asset name.</param>
+        public EditImagePatch(string logName, ManagedContentPack contentPack, ITokenString assetName, IEnumerable<Condition> conditions, ITokenString fromAsset, Rectangle fromArea, Rectangle toArea, PatchMode patchMode, IMonitor monitor, Func<string, string> normalizeAssetName)
+            : base(logName, PatchType.EditImage, contentPack, assetName, conditions, normalizeAssetName, fromAsset: fromAsset)
         {
-            this.FromLocalAsset = fromLocalAsset;
             this.FromArea = fromArea != Rectangle.Empty ? fromArea : null as Rectangle?;
             this.ToArea = toArea != Rectangle.Empty ? toArea : null as Rectangle?;
             this.PatchMode = patchMode;
             this.Monitor = monitor;
-        }
-
-        /// <summary>Update the patch data when the context changes.</summary>
-        /// <param name="context">The condition context.</param>
-        /// <returns>Returns whether the patch data changed.</returns>
-        public override bool UpdateContext(IContext context)
-        {
-            bool localAssetChanged = this.FromLocalAsset.UpdateContext(context);
-            return base.UpdateContext(context) || localAssetChanged;
         }
 
         /// <summary>Apply the patch to a loaded asset.</summary>
@@ -73,12 +62,17 @@ namespace ContentPatcher.Framework.Patches
             // validate
             if (typeof(T) != typeof(Texture2D))
             {
-                this.Monitor.Log($"Can't apply image patch \"{this.LogName}\" to {this.AssetName}: this file isn't an image file (found {typeof(T)}).", LogLevel.Warn);
+                this.Monitor.Log($"Can't apply image patch \"{this.LogName}\" to {this.TargetAsset}: this file isn't an image file (found {typeof(T)}).", LogLevel.Warn);
+                return;
+            }
+            if (!this.FromAssetExists())
+            {
+                this.Monitor.Log($"Can't apply image patch \"{this.LogName}\" to {this.TargetAsset}: the {nameof(PatchConfig.FromFile)} file '{this.FromAsset}' doesn't exist.", LogLevel.Warn);
                 return;
             }
 
             // fetch data
-            Texture2D source = this.ContentPack.Load<Texture2D>(this.FromLocalAsset.Value);
+            Texture2D source = this.ContentPack.Load<Texture2D>(this.FromAsset);
             Rectangle sourceArea = this.FromArea ?? new Rectangle(0, 0, source.Width, source.Height);
             Rectangle targetArea = this.ToArea ?? new Rectangle(0, 0, sourceArea.Width, sourceArea.Height);
             IAssetDataForImage editor = asset.AsImage();
@@ -114,16 +108,22 @@ namespace ContentPatcher.Framework.Patches
                 Texture2D texture = new Texture2D(Game1.graphics.GraphicsDevice, original.Width, targetArea.Bottom);
                 editor.ReplaceWith(texture);
                 editor.PatchImage(original);
+                this.ResizedLastImage = true;
             }
+            else
+                this.ResizedLastImage = false;
 
             // apply source image
             editor.PatchImage(source, sourceArea, this.ToArea, this.PatchMode);
         }
 
-        /// <summary>Get the tokens used by this patch in its fields.</summary>
-        public override IEnumerable<TokenName> GetTokensUsed()
+        /// <summary>Get a human-readable list of changes applied to the asset for display when troubleshooting.</summary>
+        public override IEnumerable<string> GetChangeLabels()
         {
-            return base.GetTokensUsed().Union(this.FromLocalAsset.Tokens);
+            if (this.ResizedLastImage)
+                yield return "resized image";
+
+            yield return "edited image";
         }
     }
 }
