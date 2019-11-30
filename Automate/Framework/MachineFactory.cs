@@ -104,7 +104,7 @@ namespace Pathoschild.Stardew.Automate.Framework
                     continue;
                 
                 // Determine what is in the tile
-                Rectangle tileArea = FloodFillTile(group, location, tile, reflection);
+                Rectangle tileArea = this.FloodFillTile(group, location, tile, reflection);
 
                 if (tileArea == Rectangle.Empty)
                     continue; // nothing in this tile; continue searching elsewhere
@@ -316,13 +316,13 @@ namespace Pathoschild.Stardew.Automate.Framework
                 return new JunimoHutMachine(hut);
             if (building is Mill mill)
                 return new MillMachine(mill);
-            if (this.AutomateShippingBin && location is Farm farm && building is ShippingBin)
-                return new ShippingBinMachine(farm);
+ //           if (this.AutomateShippingBin && location is Farm farm && building is ShippingBin)
+ ///               return new ShippingBinMachine(farm);
             if (building.buildingType.Value == "Silo")
                 return new FeedHopperMachine();
             if (building is Coop coop)
                 return new CoopMachine(coop);
-            if (building is Barn barn)
+            if (building is Barn barn && location is Farm farm)
                 return new FarmAnimalMachine(farm, barn);
             return null;
         }
